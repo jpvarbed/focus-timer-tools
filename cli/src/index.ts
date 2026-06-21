@@ -63,7 +63,7 @@ async function main() {
   }
   // Defaults to the focus.jasonv.dev deployment; override with CONVEX_URL.
   const url =
-    process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "https://vivid-ant-124.convex.cloud";
+    process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "https://perceptive-butterfly-406.convex.cloud";
   const userId = process.env.FOCUS_USER_ID ?? "";
   if (!userId) {
     console.error(

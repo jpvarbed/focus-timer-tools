@@ -4,7 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 // The focus.jasonv.dev Convex deployment (public client URL). Override with CONVEX_URL.
-export const DEFAULT_CONVEX_URL = "https://vivid-ant-124.convex.cloud";
+export const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
 
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);
