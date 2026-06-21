@@ -8,6 +8,14 @@ this CLI, an MCP-connected agent, and the skill all drive **one coherent timer**
 The app itself (web + Convex backend) lives in a separate private repo. These tools talk to its
 public Convex deployment.
 
+## Install the skill
+
+```bash
+npx skills add jpvarbed/focus-timer-tools
+```
+
+Installs the `focus-timer` skill (`skills/focus-timer/SKILL.md`) into your agent.
+
 ## Identity
 
 Set `FOCUS_USER_ID` to your account id to drive *your* timer — copy it from the web app
@@ -43,5 +51,6 @@ Tools: `focus_status`, `focus_start`, `focus_pause`, `focus_resume`, `focus_skip
 
 ## Claude skill
 
-[`skill/SKILL.md`](skill/SKILL.md) — drop into your skills dir; wraps the CLI so an agent can
-pace its own work in focus blocks.
+[`skills/focus-timer/SKILL.md`](skills/focus-timer/SKILL.md) — installed via `npx skills add`
+above (or drop into your skills dir). Wraps the CLI so an agent can pace its own work in focus
+blocks.
