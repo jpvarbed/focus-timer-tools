@@ -1,0 +1,16 @@
+{
+  "name": "@focus-tools/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "focus": "./src/index.ts" },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile dist/focus"
+  },
+  "dependencies": {
+    "convex": "^1.17.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

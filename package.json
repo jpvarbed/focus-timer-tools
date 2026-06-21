@@ -1,0 +1,13 @@
+{
+  "name": "focus-timer-tools",
+  "private": true,
+  "type": "module",
+  "workspaces": ["cli", "mcp"],
+  "scripts": {
+    "build": "bun --filter '*' run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "engines": { "node": ">=20" }
+}
