@@ -49,6 +49,10 @@ Add to your MCP client (Claude Desktop/Code):
 Tools: `focus_status`, `focus_start`, `focus_pause`, `focus_resume`, `focus_skip`,
 `focus_reset`, `focus_stats`.
 
+**Hosted (remote) MCP:** `https://mcp.jasonv.dev/api/mcp` — pass your id via the `x-focus-user`
+header. Advertised for agentic discovery at
+[focus.jasonv.dev/.well-known/ai-catalog.json](https://focus.jasonv.dev/.well-known/ai-catalog.json) (ARD).
+
 ## Claude skill
 
 [`skills/focus-timer/SKILL.md`](skills/focus-timer/SKILL.md) — installed via `npx skills add`
