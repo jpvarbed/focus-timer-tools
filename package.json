@@ -6,8 +6,17 @@
   "scripts": {
     "build": "bun --filter '*' run build"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "convex": "^1.17.4",
+    "zod": "^3.23.8"
+  },
   "devDependencies": {
+    "@types/node": "^20",
+    "@vercel/node": "^5.0.0",
     "typescript": "^5.7.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

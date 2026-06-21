@@ -1,0 +1,4 @@
+{
+  "buildCommand": "echo 'no workspace build — /api/mcp is built by Vercel'",
+  "outputDirectory": "."
+}
