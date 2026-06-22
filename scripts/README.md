@@ -45,3 +45,24 @@ The harness fires the hook; the script maps the CC lifecycle to fleet presence:
 
 Semantic reporting (asks with text, decisions/provenance) stays explicit via the MCP/CLI
 (`focus_ask`, `focus_event`) — hooks only cover automatic presence. Python 3 only (stdlib).
+
+## `graph.ts` — Neo4j graph brain (FOC-14 / slice 4)
+
+Projects the Convex provenance log into Neo4j (Aura) and queries it. Convex is the source of
+truth; Neo4j is a read-side projection (batch, idempotent `MERGE`). Convex can't open Bolt, so
+this runs externally.
+
+```bash
+# env (fetch from bws): NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, FOCUS_USER_ID [, CONVEX_URL]
+bun scripts/graph.ts sync                 # project Convex -> Neo4j
+bun scripts/graph.ts stats                # node/edge counts
+bun scripts/graph.ts knowledge <slug>     # (c) which decisions cited a concept
+bun scripts/graph.ts lineage <ref>        # (c) what fed a ref (slug | commit sha | file path)
+bun scripts/graph.ts patterns             # (d) orphan tasks + most-cited knowledge
+```
+
+Node types: `Project Task Agent Knowledge Event Commit File`. Edges: structural
+(`CONTAINS ON WORKS_IN MADE`) + typed provenance refs (`INFORMS PRODUCES LANDS_IN …`). Run
+`sync` on a cron to keep the brain fresh. AuraDB Free auto-pauses after 72h idle — resume via
+the aura provisioning skill. Aura instance creds live in bws (`NEO4J_*`, `AURA_INSTANCE_ID`).
+

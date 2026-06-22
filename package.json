@@ -9,6 +9,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "convex": "^1.17.4",
+    "neo4j-driver": "^6.1.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
