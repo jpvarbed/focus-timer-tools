@@ -16,6 +16,7 @@ import { makeFunctionReference } from "convex/server";
 // `@focus/backend/api` after `convex dev` if you want arg/return type-safety here.
 const q = (name: string) => makeFunctionReference<"query">(name);
 const mut = (name: string) => makeFunctionReference<"mutation">(name);
+const act = (name: string) => makeFunctionReference<"action">(name);
 
 const USAGE =
   "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|\n" +
@@ -151,6 +152,33 @@ async function main() {
         userId, agentId: kv.agent, severity: (kv.severity ?? "soft") as "soft", ...(question ? { question } : {}),
       });
       console.log(`raised ${kv.severity ?? "soft"} ask for ${kv.agent}`);
+      break;
+    }
+    case "recall": {
+      const query = rest.filter((x) => !x.includes("=")).join(" ");
+      const hits = (await http.action(act("knowledge:search"), { userId, query })) as Array<{
+        slug: string; title: string; score: number;
+      }>;
+      if (!hits.length) {
+        console.log("No matching concepts.");
+        break;
+      }
+      for (const h of hits) console.log(`knowledge:${h.slug} (${h.score.toFixed(2)}) — ${h.title}`);
+      break;
+    }
+    case "learn": {
+      const kv = parseKv(rest);
+      const title = rest.filter((x) => !x.includes("=")).join(" ") || kv.title;
+      if (!title || !kv.body) {
+        console.error('usage: focus learn "Title" body="..." [tags=a,b] [project=p]');
+        process.exit(1);
+      }
+      const r = (await http.action(act("knowledge:upsert"), {
+        userId, title, body: kv.body,
+        ...(kv.tags ? { tags: kv.tags.split(",") } : {}),
+        ...(kv.project ? { project: kv.project } : {}),
+      })) as { slug: string; created: boolean; reason?: string };
+      console.log(`${r.created ? "created" : "reused (" + r.reason + ")"} -> knowledge:${r.slug}`);
       break;
     }
     case "watch": {

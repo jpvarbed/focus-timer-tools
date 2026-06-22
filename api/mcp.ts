@@ -12,6 +12,7 @@ import { makeFunctionReference } from "convex/server";
 const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);
+const act = (name: string) => makeFunctionReference<"action">(name);
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -113,6 +114,31 @@ function buildServer(userId: string) {
     const asky = asks.surfaced.map((x) => `  ! ${x.agentId}: ${x.question ?? "(needs a decision)"} [${x.severity}]`);
     return text([...lines, ...(asky.length ? ["asks needing you:", ...asky] : []), `(${asks.held.length} held)`].join("\n"));
   });
+
+  // ---- knowledge (semantic) ----
+  server.tool(
+    "focus_recall",
+    "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
+    { query: z.string(), limit: z.number().optional() },
+    async ({ query, limit }) => {
+      const hits = (await client.action(act("knowledge:search"), { userId, query, ...(limit ? { limit } : {}) })) as Array<{
+        slug: string; title: string; score: number;
+      }>;
+      if (!hits.length) return text("No matching concepts. Use focus_learn to capture one.");
+      return text(hits.map((h) => `knowledge:${h.slug} (${h.score.toFixed(2)}) — ${h.title}`).join("\n"));
+    },
+  );
+  server.tool(
+    "focus_learn",
+    "Record a knowledge concept (cite-or-create; dedups by slug + meaning). Returns the slug to cite in a decision's refs.",
+    { title: z.string(), body: z.string(), tags: z.array(z.string()).optional(), project: z.string().optional() },
+    async ({ title, body, tags, project }) => {
+      const r = (await client.action(act("knowledge:upsert"), {
+        userId, title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}),
+      })) as { slug: string; created: boolean; reason?: string };
+      return text(`${r.created ? "created" : "reused (" + r.reason + ")"} → knowledge:${r.slug}`);
+    },
+  );
   return server;
 }
 
