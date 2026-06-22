@@ -132,7 +132,7 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
   // ---- knowledge (semantic) ----
   server.tool(
     "focus_recall",
-    "Semantic search Jason's knowledge concepts. Use BEFORE a decision to find prior knowledge to cite (knowledge:<slug>).",
+    "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
     { query: z.string(), limit: z.number().optional() },
     async ({ query, limit }) => {
       const hits = (await client.action(act("knowledge:search"), {
