@@ -59,6 +59,60 @@ function buildServer(userId: string) {
     const s = (await client.query(q("stats:getToday"), { userId })) as { count: number; totalMs: number };
     return text(`Today: ${s.count} focus sessions · ${Math.round(s.totalMs / 60000)} min`);
   });
+
+  // ---- fleet (attention orchestrator) ----
+  server.tool(
+    "focus_report",
+    "Report this agent's presence to the fleet. Optional task groups agents working one workstream.",
+    {
+      agentId: z.string().describe("stable id for this agent/session"),
+      project: z.string().describe("project the agent is working in"),
+      state: z.enum(["working", "needs_you", "done"]),
+      task: z.string().optional().describe("workstream title to group under"),
+    },
+    async ({ agentId, project, state, task }) => {
+      await client.mutation(m("fleet:report"), { userId, agentId, project, state, source: "mcp", ...(task ? { task } : {}) });
+      return text(`reported ${agentId} · ${state}${task ? " · " + task : ""}`);
+    },
+  );
+  server.tool(
+    "focus_ask",
+    "Raise a question for Jason. soft = can wait (held during his focus block, surfaces at his break); hard = blocked, pierces now.",
+    { agentId: z.string(), question: z.string().optional(), severity: z.enum(["hard", "soft"]).default("soft") },
+    async ({ agentId, question, severity }) => {
+      await client.mutation(m("fleet:raiseAsk"), { userId, agentId, severity, ...(question ? { question } : {}) });
+      return text(`raised ${severity} ask for ${agentId}`);
+    },
+  );
+  server.tool(
+    "focus_event",
+    "Record a provenance event. For a decision, cite knowledge in refs, e.g. {type:'informs',target:'knowledge:<id>'}.",
+    {
+      agentId: z.string(),
+      type: z.enum(["decision", "output", "handoff", "ask_answered"]),
+      summary: z.string(),
+      reasoning: z.string().optional(),
+      refs: z.array(z.object({ type: z.string(), target: z.string() })).optional(),
+    },
+    async ({ agentId, type, summary, reasoning, refs }) => {
+      const r = (await client.mutation(m("fleet:recordEvent"), {
+        userId, agentId, type, summary, reasoning, refs: refs ?? [],
+      })) as { knowledgeGap: boolean };
+      return text(`recorded ${type}: ${summary}${r.knowledgeGap ? " (⚠ no knowledge cited)" : ""}`);
+    },
+  );
+  server.tool("focus_fleet", "Show the fleet: agents grouped by project/task + open asks.", {}, async () => {
+    const agents = (await client.query(q("fleet:list"), { userId })) as Array<{
+      agentId: string; project: string; state: string; taskTitle: string | null;
+    }>;
+    const asks = (await client.query(q("fleet:asks"), { userId })) as {
+      surfaced: Array<{ agentId: string; question?: string; severity: string }>; held: unknown[];
+    };
+    if (agents.length === 0) return text("No agents reporting.");
+    const lines = agents.map((a) => `· ${a.project}${a.taskTitle ? "/" + a.taskTitle : ""} — ${a.agentId} [${a.state}]`);
+    const asky = asks.surfaced.map((x) => `  ! ${x.agentId}: ${x.question ?? "(needs a decision)"} [${x.severity}]`);
+    return text([...lines, ...(asky.length ? ["asks needing you:", ...asky] : []), `(${asks.held.length} held)`].join("\n"));
+  });
   return server;
 }
 

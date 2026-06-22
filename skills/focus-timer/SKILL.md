@@ -1,6 +1,6 @@
 ---
 name: focus-timer
-description: Start, check, and control a server-owned Pomodoro focus/break timer (focus.jasonv.dev) from the terminal. Use when the user wants to start a focus session, take a break, check time remaining, see today's focus stats, or have an agent pace its own work in timed blocks.
+description: Control the server-owned Pomodoro timer AND report into the attention-orchestrator fleet (focus.jasonv.dev) — start/check/pace a focus timer, and report agent presence, raise asks for the human, or record provenance events. Use when the user wants to start a focus session or check time, or when an agent should report its status to Jason's fleet, ask him a question, or log a decision/output.
 ---
 
 # Focus Timer
@@ -21,8 +21,10 @@ export FOCUS_USER_ID="<your-user-id>"
 bun run cli/src/index.ts <command>     # from this repo (focus-timer-tools)
 ```
 
-Or connect the **MCP server** (`mcp/src/stdio.ts`) for tools `focus_status`, `focus_start`,
-`focus_pause`, `focus_resume`, `focus_skip`, `focus_reset`, `focus_stats` — see the README.
+Or connect the **MCP server** — either the hosted one at `https://mcp.jasonv.dev/api/mcp`
+(pass your account id in the `x-focus-user` header) or local stdio (`mcp/src/stdio.ts`). Tools:
+timer (`focus_status`, `focus_start`, `focus_pause`, `focus_resume`, `focus_skip`, `focus_reset`,
+`focus_stats`) **and fleet** (`focus_report`, `focus_ask`, `focus_event`, `focus_fleet`).
 
 ## Commands
 
@@ -48,6 +50,22 @@ When the user asks you to "work in focus blocks" or to time a task:
 4. At the end, `focus stats` to report how many focus blocks the task took.
 
 Keep the label specific (what you're actually doing) so `focus stats` is meaningful later.
+
+## Reporting into the fleet (attention orchestrator)
+
+Jason runs many agents across projects; the fleet is how he sees who's working, who needs him,
+and what each agent decided. When you're an agent working on his behalf:
+
+| Command / tool | Does |
+|---|---|
+| `focus fleet` / `focus_fleet` | show the fleet — agents by project/task + open asks |
+| `focus report agent=<id> project=<p> [state=working\|needs_you\|done] [task=<title>]` / `focus_report` | report your presence; `task` groups 2+ agents on one workstream |
+| `focus ask agent=<id> [severity=soft\|hard] "question"` / `focus_ask` | ask Jason a question. **soft** = can wait (held during his focus block, surfaces at his break); **hard** = you're blocked, pierces now |
+| `focus_event` (MCP) | record a provenance event (`decision`/`output`/…); for a decision, cite knowledge via `refs: [{type:'informs', target:'knowledge:<id>'}]` |
+
+Guidance: `report` `working` when you pick up a task and `done` when you finish; raise a `soft`
+ask for anything that can wait for his break, `hard` only when you genuinely can't proceed. Log a
+`focus_event` `decision` (with a knowledge ref) at real forks so the work is traceable.
 
 ## Notes
 

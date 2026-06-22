@@ -18,7 +18,8 @@ const q = (name: string) => makeFunctionReference<"query">(name);
 const mut = (name: string) => makeFunctionReference<"mutation">(name);
 
 const USAGE =
-  "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch>";
+  "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|\n" +
+  "             fleet|report agent= project= [state=] [task=]|ask agent= [severity=] \"q\">";
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -108,6 +109,48 @@ async function main() {
       if (kv.autostart) patch.autoStart = kv.autostart === "true";
       if (Object.keys(patch).length) await http.mutation(mut("config:update"), { userId, ...patch });
       console.log(JSON.stringify(await http.query(q("config:get"), { userId }), null, 2));
+      break;
+    }
+    case "fleet": {
+      const agents = (await http.query(q("fleet:list"), { userId })) as Array<{
+        agentId: string; project: string; state: string; taskTitle: string | null;
+      }>;
+      const asks = (await http.query(q("fleet:asks"), { userId })) as {
+        surfaced: Array<{ agentId: string; question?: string; severity: string }>; held: unknown[];
+      };
+      if (!agents.length) {
+        console.log("No agents reporting.");
+        break;
+      }
+      for (const a of agents) console.log(`· ${a.project}${a.taskTitle ? "/" + a.taskTitle : ""} — ${a.agentId} [${a.state}]`);
+      for (const x of asks.surfaced) console.log(`  ! ${x.agentId}: ${x.question ?? "(needs a decision)"} [${x.severity}]`);
+      console.log(`(${asks.held.length} held)`);
+      break;
+    }
+    case "report": {
+      const kv = parseKv(rest);
+      if (!kv.agent || !kv.project) {
+        console.error("usage: focus report agent=<id> project=<name> [state=working|needs_you|done] [task=<title>]");
+        process.exit(1);
+      }
+      await http.mutation(mut("fleet:report"), {
+        userId, agentId: kv.agent, project: kv.project, state: (kv.state ?? "working") as "working", source: "cli",
+        ...(kv.task ? { task: kv.task } : {}),
+      });
+      console.log(`reported ${kv.agent} · ${kv.state ?? "working"}`);
+      break;
+    }
+    case "ask": {
+      const kv = parseKv(rest);
+      const question = rest.filter((a) => !a.includes("=")).join(" ") || kv.q;
+      if (!kv.agent) {
+        console.error('usage: focus ask agent=<id> [severity=soft|hard] "your question"');
+        process.exit(1);
+      }
+      await http.mutation(mut("fleet:raiseAsk"), {
+        userId, agentId: kv.agent, severity: (kv.severity ?? "soft") as "soft", ...(question ? { question } : {}),
+      });
+      console.log(`raised ${kv.severity ?? "soft"} ask for ${kv.agent}`);
       break;
     }
     case "watch": {
