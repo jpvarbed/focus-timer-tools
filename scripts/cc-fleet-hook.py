@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CC -> focus fleet auto-report hook (FOC-12).
+"""CC -> focus fleet auto-report hook (FOC-12, keyed in FOC-25).
 
 Wire into ~/.claude/settings.json so local Claude Code sessions report their presence to the
 focus fleet with zero per-agent effort. Reads the hook JSON on stdin; the event name is argv[1]
@@ -9,17 +9,20 @@ focus fleet with zero per-agent effort. Reads the hook JSON on stdin; the event 
     Notification                    -> needs_you   (CC is waiting on the human)
     Stop / SubagentStop             -> done        (turn finished)
 
-Identity: FOCUS_USER_ID (= the web app's focus_user_id cookie). Endpoint: FOCUS_CONVEX_URL
-(defaults to prod). Designed to NEVER block or fail Claude Code: no id -> no-op, all errors
-swallowed, always exits 0, 3s timeout.
+Auth: FOCUS_API_KEY — a minted `ak_…` key (focus web -> Settings -> Mint key), kept in bws and
+injected via settings.json env. The owner is derived from the KEY server-side; no cleartext
+account id is ever carried. Endpoint: FOCUS_CONVEX_SITE (the deployment's .convex.site host).
+Designed to NEVER block or fail Claude Code: no key -> no-op, all errors swallowed, always
+exits 0, 3s timeout.
 """
 import sys, os, json, urllib.request
 
-uid = os.environ.get("FOCUS_USER_ID")
-if not uid:
-    sys.exit(0)  # no identity configured -> silently do nothing
+key = os.environ.get("FOCUS_API_KEY")
+if not key:
+    sys.exit(0)  # no key configured -> silently do nothing
 
-url = os.environ.get("FOCUS_CONVEX_URL", "https://perceptive-butterfly-406.convex.cloud")
+# The .convex.site HTTP host (NOT .convex.cloud). Defaults to the auth-enabled deployment.
+site = os.environ.get("FOCUS_CONVEX_SITE", "https://vivid-ant-124.convex.site").rstrip("/")
 
 try:
     payload = json.load(sys.stdin)
@@ -41,16 +44,12 @@ cwd = (payload.get("cwd") or "").rstrip("/")
 project = cwd.split("/")[-1] or "unknown"
 agent = "cc-" + (payload.get("session_id") or "session")[:6]
 
-body = {
-    "path": "fleet:report",
-    "args": {"userId": uid, "agentId": agent, "project": project, "state": state, "source": "cc"},
-    "format": "json",
-}
+body = {"agentId": agent, "project": project, "state": state, "source": "cc"}
 try:
     req = urllib.request.Request(
-        url + "/api/mutation",
+        site + "/agent/report",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
     )
     urllib.request.urlopen(req, timeout=3).read()
 except Exception:

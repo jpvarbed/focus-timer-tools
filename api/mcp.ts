@@ -1,6 +1,7 @@
 // Remote (HTTP) MCP endpoint for the focus timer — a stateless Streamable-HTTP transport,
 // deployed as a Vercel function so it has a callable URL (for ARD discovery).
-// The caller's focus account id comes from the `x-focus-user` header.
+// Timer control/read tools identify the caller via the `x-focus-user` header; agent-write tools
+// (report/ask/event/recall/learn) authenticate with a minted key via `Authorization: Bearer ak_…`.
 //
 // Self-contained on purpose (no cross-workspace import) so the serverless bundle is simple.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -10,9 +11,21 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);
-const act = (name: string) => makeFunctionReference<"action">(name);
+
+/** POST an agent write to the keyed HTTP layer; the owner is derived from `key`, not the body. */
+async function agentPost<T>(key: string, path: string, body: unknown): Promise<T> {
+  if (!key) throw new Error("Pass a minted key via Authorization: Bearer ak_… for agent tools.");
+  const res = await fetch(`${FOCUS_SITE}/agent/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`agent request failed (${res.status}): ${await res.text()}`);
+  return (await res.json()) as T;
+}
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -34,7 +47,7 @@ function render(s: TimerView): string {
   return `${PHASE[s.phase]} ${fmt(live)} [${s.status}] · cycle ${s.cycleCount}/${s.config.longBreakInterval}${label}`;
 }
 
-function buildServer(userId: string) {
+function buildServer(userId: string, apiKey: string) {
   const client = new ConvexHttpClient(process.env.CONVEX_URL ?? DEFAULT_CONVEX_URL);
   const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
   const status = async () => render((await client.query(q("timer:get"), { userId })) as TimerView);
@@ -72,7 +85,7 @@ function buildServer(userId: string) {
       task: z.string().optional().describe("workstream title to group under"),
     },
     async ({ agentId, project, state, task }) => {
-      await client.mutation(m("fleet:report"), { userId, agentId, project, state, source: "mcp", ...(task ? { task } : {}) });
+      await agentPost(apiKey, "report", { agentId, project, state, source: "mcp", ...(task ? { task } : {}) });
       return text(`reported ${agentId} · ${state}${task ? " · " + task : ""}`);
     },
   );
@@ -81,7 +94,7 @@ function buildServer(userId: string) {
     "Raise a question for Jason. soft = can wait (held during his focus block, surfaces at his break); hard = blocked, pierces now.",
     { agentId: z.string(), question: z.string().optional(), severity: z.enum(["hard", "soft"]).default("soft") },
     async ({ agentId, question, severity }) => {
-      await client.mutation(m("fleet:raiseAsk"), { userId, agentId, severity, ...(question ? { question } : {}) });
+      await agentPost(apiKey, "ask", { agentId, severity, ...(question ? { question } : {}) });
       return text(`raised ${severity} ask for ${agentId}`);
     },
   );
@@ -96,9 +109,9 @@ function buildServer(userId: string) {
       refs: z.array(z.object({ type: z.string(), target: z.string() })).optional(),
     },
     async ({ agentId, type, summary, reasoning, refs }) => {
-      const r = (await client.mutation(m("fleet:recordEvent"), {
-        userId, agentId, type, summary, reasoning, refs: refs ?? [],
-      })) as { knowledgeGap: boolean };
+      const r = await agentPost<{ knowledgeGap: boolean }>(apiKey, "event", {
+        agentId, type, summary, reasoning, refs: refs ?? [],
+      });
       return text(`recorded ${type}: ${summary}${r.knowledgeGap ? " (⚠ no knowledge cited)" : ""}`);
     },
   );
@@ -121,9 +134,9 @@ function buildServer(userId: string) {
     "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
     { query: z.string(), limit: z.number().optional() },
     async ({ query, limit }) => {
-      const hits = (await client.action(act("knowledge:search"), { userId, query, ...(limit ? { limit } : {}) })) as Array<{
-        slug: string; title: string; score: number;
-      }>;
+      const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
+        apiKey, "knowledge/search", { query, ...(limit ? { limit } : {}) },
+      );
       if (!hits.length) return text("No matching concepts. Use focus_learn to capture one.");
       return text(hits.map((h) => `knowledge:${h.slug} (${h.score.toFixed(2)}) — ${h.title}`).join("\n"));
     },
@@ -133,9 +146,9 @@ function buildServer(userId: string) {
     "Record a knowledge concept (cite-or-create; dedups by slug + meaning). Returns the slug to cite in a decision's refs.",
     { title: z.string(), body: z.string(), tags: z.array(z.string()).optional(), project: z.string().optional() },
     async ({ title, body, tags, project }) => {
-      const r = (await client.action(act("knowledge:upsert"), {
-        userId, title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}),
-      })) as { slug: string; created: boolean; reason?: string };
+      const r = await agentPost<{ slug: string; created: boolean; reason?: string }>(
+        apiKey, "knowledge/upsert", { title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}) },
+      );
       return text(`${r.created ? "created" : "reused (" + r.reason + ")"} → knowledge:${r.slug}`);
     },
   );
@@ -145,18 +158,23 @@ function buildServer(userId: string) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function handler(req: any, res: any) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "content-type, x-focus-user, mcp-session-id, mcp-protocol-version");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, x-focus-user, mcp-session-id, mcp-protocol-version");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
   }
-  const userId = req.headers["x-focus-user"] ?? req.query?.user;
-  if (!userId || typeof userId !== "string") {
-    res.status(401).json({ error: "Set the x-focus-user header to your focus.jasonv.dev account id." });
+  const rawUser = req.headers["x-focus-user"] ?? req.query?.user;
+  const userId = typeof rawUser === "string" ? rawUser : "";
+  const auth = req.headers["authorization"];
+  const apiKey = typeof auth === "string" ? auth.replace(/^Bearer\s+/i, "").trim() : "";
+  if (!userId && !apiKey) {
+    res.status(401).json({
+      error: "Set x-focus-user (account id) for timer tools, or Authorization: Bearer ak_… for agent tools.",
+    });
     return;
   }
-  const server = buildServer(userId);
+  const server = buildServer(userId, apiKey);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on("close", () => {
     void transport.close();

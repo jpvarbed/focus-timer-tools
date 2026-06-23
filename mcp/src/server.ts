@@ -5,10 +5,23 @@ import { makeFunctionReference } from "convex/server";
 
 // The focus.jasonv.dev Convex deployment (public client URL). Override with CONVEX_URL.
 export const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
+// Agent-write surface: keyed /agent/* endpoints on the .convex.site host (FOC-24/25).
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
 
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);
-const act = (name: string) => makeFunctionReference<"action">(name);
+
+/** POST an agent write to the keyed HTTP layer; the owner is derived from `key`, not the body. */
+async function agentPost<T>(key: string, path: string, body: unknown): Promise<T> {
+  if (!key) throw new Error("FOCUS_API_KEY is not set (focus web → Settings → Mint key).");
+  const res = await fetch(`${FOCUS_SITE}/agent/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`agent request failed (${res.status}): ${await res.text()}`);
+  return (await res.json()) as T;
+}
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -32,8 +45,9 @@ function render(s: TimerView): string {
   return `${PHASE[s.phase]} ${fmt(live)} [${s.status}] · cycle ${s.cycleCount}/${s.config.longBreakInterval}${label}`;
 }
 
-/** Build the focus-timer MCP server. `getUserId` resolves the caller's account id per request. */
-export function buildServer(opts: { convexUrl?: string; getUserId: () => string }) {
+/** Build the focus-timer MCP server. `getUserId` resolves the caller's account id (control/read
+ *  commands); `getKey` resolves the caller's minted key (agent writes). */
+export function buildServer(opts: { convexUrl?: string; getUserId: () => string; getKey: () => string }) {
   const client = new ConvexHttpClient(opts.convexUrl ?? DEFAULT_CONVEX_URL);
   const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
   const status = async () =>
@@ -82,8 +96,8 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
       task: z.string().optional().describe("workstream title to group under"),
     },
     async ({ agentId, project, state, task }) => {
-      await client.mutation(m("fleet:report"), {
-        userId: opts.getUserId(), agentId, project, state, source: "mcp", ...(task ? { task } : {}),
+      await agentPost(opts.getKey(), "report", {
+        agentId, project, state, source: "mcp", ...(task ? { task } : {}),
       });
       return text(`reported ${agentId} · ${state}${task ? " · " + task : ""}`);
     },
@@ -93,9 +107,7 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
     "Raise a question for Jason. soft = can wait (held during his focus block, surfaces at his break); hard = blocked, pierces now.",
     { agentId: z.string(), question: z.string().optional(), severity: z.enum(["hard", "soft"]).default("soft") },
     async ({ agentId, question, severity }) => {
-      await client.mutation(m("fleet:raiseAsk"), {
-        userId: opts.getUserId(), agentId, severity, ...(question ? { question } : {}),
-      });
+      await agentPost(opts.getKey(), "ask", { agentId, severity, ...(question ? { question } : {}) });
       return text(`raised ${severity} ask for ${agentId}`);
     },
   );
@@ -110,9 +122,9 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
       refs: z.array(z.object({ type: z.string(), target: z.string() })).optional(),
     },
     async ({ agentId, type, summary, reasoning, refs }) => {
-      const r = (await client.mutation(m("fleet:recordEvent"), {
-        userId: opts.getUserId(), agentId, type, summary, reasoning, refs: refs ?? [],
-      })) as { knowledgeGap: boolean };
+      const r = await agentPost<{ knowledgeGap: boolean }>(opts.getKey(), "event", {
+        agentId, type, summary, reasoning, refs: refs ?? [],
+      });
       return text(`recorded ${type}: ${summary}${r.knowledgeGap ? " (⚠ no knowledge cited)" : ""}`);
     },
   );
@@ -135,9 +147,9 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
     "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
     { query: z.string(), limit: z.number().optional() },
     async ({ query, limit }) => {
-      const hits = (await client.action(act("knowledge:search"), {
-        userId: opts.getUserId(), query, ...(limit ? { limit } : {}),
-      })) as Array<{ slug: string; title: string; score: number }>;
+      const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
+        opts.getKey(), "knowledge/search", { query, ...(limit ? { limit } : {}) },
+      );
       if (!hits.length) return text("No matching concepts. Use focus_learn to capture one.");
       return text(hits.map((h) => `knowledge:${h.slug} (${h.score.toFixed(2)}) — ${h.title}`).join("\n"));
     },
@@ -147,9 +159,9 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string 
     "Record a knowledge concept (cite-or-create; dedups by slug + meaning). Returns the slug to cite in a decision.",
     { title: z.string(), body: z.string(), tags: z.array(z.string()).optional(), project: z.string().optional() },
     async ({ title, body, tags, project }) => {
-      const r = (await client.action(act("knowledge:upsert"), {
-        userId: opts.getUserId(), title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}),
-      })) as { slug: string; created: boolean; reason?: string };
+      const r = await agentPost<{ slug: string; created: boolean; reason?: string }>(
+        opts.getKey(), "knowledge/upsert", { title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}) },
+      );
       return text(`${r.created ? "created" : "reused (" + r.reason + ")"} → knowledge:${r.slug}`);
     },
   );

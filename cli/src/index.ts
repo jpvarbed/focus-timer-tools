@@ -5,18 +5,45 @@
  * Uses string function refs (makeFunctionReference) so it builds without codegen.
  * After `convex dev`, optionally swap to the typed `api` from `@focus/backend/api`.
  *
- * Env: CONVEX_URL (or VITE_CONVEX_URL) — the deployment URL.
- *      FOCUS_USER_ID — your account id (copy the web's localStorage `focus_user_id` to
- *      drive the same timer, or use a fresh value for a separate one).
+ * Two auth paths during the auth rollout (FOC-25):
+ *   • Agent writes (report/ask/learn/recall) → POST {FOCUS_CONVEX_SITE}/agent/* with a minted
+ *     FOCUS_API_KEY (focus web → Settings → Mint key). The owner is derived from the key; no
+ *     cleartext account id is carried.
+ *   • Timer control + reads (status/start/…/stats/config/fleet) → the timer deployment as the
+ *     owner. Until auth ships to prod these still use FOCUS_USER_ID + CONVEX_URL.
+ *
+ * Env: CONVEX_URL (or VITE_CONVEX_URL) — the .convex.cloud deployment (control/reads).
+ *      FOCUS_USER_ID — your account id (web cookie `focus_user_id`), for control/reads.
+ *      FOCUS_API_KEY — minted `ak_…` key, for agent writes.
+ *      FOCUS_CONVEX_SITE — the .convex.site host for /agent/* (defaults to the keyed deployment).
  */
 import { ConvexHttpClient, ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+
+// Agent-write surface: keyed HTTP endpoints on the .convex.site host (FOC-24/25).
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
+const FOCUS_KEY = process.env.FOCUS_API_KEY ?? "";
+async function agentPost<T>(path: string, body: unknown): Promise<T> {
+  if (!FOCUS_KEY) {
+    console.error("Set FOCUS_API_KEY (focus web → Settings → Mint key) for agent commands.");
+    process.exit(1);
+  }
+  const res = await fetch(`${FOCUS_SITE}/agent/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${FOCUS_KEY}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    console.error(`agent request failed (${res.status}): ${await res.text()}`);
+    process.exit(1);
+  }
+  return (await res.json()) as T;
+}
 
 // String refs ("file:export") work without codegen. Swap to the typed `api` from
 // `@focus/backend/api` after `convex dev` if you want arg/return type-safety here.
 const q = (name: string) => makeFunctionReference<"query">(name);
 const mut = (name: string) => makeFunctionReference<"mutation">(name);
-const act = (name: string) => makeFunctionReference<"action">(name);
 
 const USAGE =
   "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|\n" +
@@ -66,11 +93,14 @@ async function main() {
   // Defaults to the focus.jasonv.dev deployment; override with CONVEX_URL.
   const url =
     process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "https://perceptive-butterfly-406.convex.cloud";
+  // Agent-write commands authenticate with FOCUS_API_KEY (handled by agentPost); only the
+  // control/read commands need the owner id.
+  const AGENT_CMDS = new Set(["report", "ask", "learn", "recall"]);
   const userId = process.env.FOCUS_USER_ID ?? "";
-  if (!userId) {
+  if (!AGENT_CMDS.has(cmd) && !userId) {
     console.error(
-      "Set FOCUS_USER_ID (your account id). Copy it from the web app — devtools →\n" +
-        "Application → Cookies → 'focus_user_id' — or make a fresh one with: uuidgen",
+      "Set FOCUS_USER_ID (your account id) for timer/fleet commands. Copy it from the web app —\n" +
+        "devtools → Application → Cookies → 'focus_user_id' — or make a fresh one with: uuidgen",
     );
     process.exit(1);
   }
@@ -134,8 +164,8 @@ async function main() {
         console.error("usage: focus report agent=<id> project=<name> [state=working|needs_you|done] [task=<title>]");
         process.exit(1);
       }
-      await http.mutation(mut("fleet:report"), {
-        userId, agentId: kv.agent, project: kv.project, state: (kv.state ?? "working") as "working", source: "cli",
+      await agentPost("report", {
+        agentId: kv.agent, project: kv.project, state: kv.state ?? "working", source: "cli",
         ...(kv.task ? { task: kv.task } : {}),
       });
       console.log(`reported ${kv.agent} · ${kv.state ?? "working"}`);
@@ -148,17 +178,18 @@ async function main() {
         console.error('usage: focus ask agent=<id> [severity=soft|hard] "your question"');
         process.exit(1);
       }
-      await http.mutation(mut("fleet:raiseAsk"), {
-        userId, agentId: kv.agent, severity: (kv.severity ?? "soft") as "soft", ...(question ? { question } : {}),
+      await agentPost("ask", {
+        agentId: kv.agent, severity: kv.severity ?? "soft", ...(question ? { question } : {}),
       });
       console.log(`raised ${kv.severity ?? "soft"} ask for ${kv.agent}`);
       break;
     }
     case "recall": {
       const query = rest.filter((x) => !x.includes("=")).join(" ");
-      const hits = (await http.action(act("knowledge:search"), { userId, query })) as Array<{
-        slug: string; title: string; score: number;
-      }>;
+      const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
+        "knowledge/search",
+        { query },
+      );
       if (!hits.length) {
         console.log("No matching concepts.");
         break;
@@ -173,11 +204,11 @@ async function main() {
         console.error('usage: focus learn "Title" body="..." [tags=a,b] [project=p]');
         process.exit(1);
       }
-      const r = (await http.action(act("knowledge:upsert"), {
-        userId, title, body: kv.body,
+      const r = await agentPost<{ slug: string; created: boolean; reason?: string }>("knowledge/upsert", {
+        title, body: kv.body,
         ...(kv.tags ? { tags: kv.tags.split(",") } : {}),
         ...(kv.project ? { project: kv.project } : {}),
-      })) as { slug: string; created: boolean; reason?: string };
+      });
       console.log(`${r.created ? "created" : "reused (" + r.reason + ")"} -> knowledge:${r.slug}`);
       break;
     }
