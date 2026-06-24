@@ -79,10 +79,11 @@ function render(s: TimerView): string {
   return `${PHASE[s.phase]} ${fmt(liveRemaining(s))} [${s.status}] · cycle ${s.cycleCount}/${s.config.longBreakInterval}${label}`;
 }
 
+// A CLI flag is `key=value` (a bare word then '='). Free text that merely contains '=' — e.g. a
+// decision summary "Provenance = hybrid" — is NOT a flag, so match only a leading `word=`.
+const isFlag = (a: string) => /^[a-zA-Z][\w-]*=/.test(a);
 function parseKv(args: string[]): Record<string, string> {
-  return Object.fromEntries(
-    args.filter((a) => a.includes("=")).map((a) => a.split("=", 2) as [string, string]),
-  );
+  return Object.fromEntries(args.filter(isFlag).map((a) => a.split("=", 2) as [string, string]));
 }
 
 async function main() {
@@ -113,7 +114,7 @@ async function main() {
       break;
     }
     case "start": {
-      const taskLabel = rest.filter((a) => !a.includes("=")).join(" ") || undefined;
+      const taskLabel = rest.filter((a) => !isFlag(a)).join(" ") || undefined;
       await http.mutation(mut("timer:start"), taskLabel ? { userId, taskLabel } : { userId });
       console.log(render((await http.query(q("timer:get"), { userId })) as TimerView));
       break;
@@ -174,7 +175,7 @@ async function main() {
     }
     case "ask": {
       const kv = parseKv(rest);
-      const question = rest.filter((a) => !a.includes("=")).join(" ") || kv.q;
+      const question = rest.filter((a) => !isFlag(a)).join(" ") || kv.q;
       if (!kv.agent) {
         console.error('usage: focus ask agent=<id> [severity=soft|hard] "your question"');
         process.exit(1);
@@ -189,7 +190,7 @@ async function main() {
       // Record a decision at a real fork, citing the knowledge that informed it (FOC-31). The
       // cited concepts become INFORMS edges in the graph — the lineage the projection exists for.
       const kv = parseKv(rest);
-      const summary = rest.filter((a) => !a.includes("=")).join(" ") || kv.summary;
+      const summary = rest.filter((a) => !isFlag(a)).join(" ") || kv.summary;
       if (!summary) {
         console.error('usage: focus decide "what you decided" [cites=knowledge:a,knowledge:b] [agent=<id>] [project=p]');
         process.exit(1);
@@ -208,7 +209,7 @@ async function main() {
       break;
     }
     case "recall": {
-      const query = rest.filter((x) => !x.includes("=")).join(" ");
+      const query = rest.filter((x) => !isFlag(x)).join(" ");
       const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
         "knowledge/search",
         { query },
@@ -222,7 +223,7 @@ async function main() {
     }
     case "learn": {
       const kv = parseKv(rest);
-      const title = rest.filter((x) => !x.includes("=")).join(" ") || kv.title;
+      const title = rest.filter((x) => !isFlag(x)).join(" ") || kv.title;
       if (!title || !kv.body) {
         console.error('usage: focus learn "Title" body="..." [tags=a,b] [project=p]');
         process.exit(1);
