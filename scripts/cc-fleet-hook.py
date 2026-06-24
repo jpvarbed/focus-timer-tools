@@ -45,6 +45,12 @@ project = cwd.split("/")[-1] or "unknown"
 agent = "cc-" + (payload.get("session_id") or "session")[:6]
 
 body = {"agentId": agent, "project": project, "state": state, "source": "cc"}
+
+# "what is this agent doing right now" — the latest prompt's first line (UserPromptSubmit only).
+# Other events leave the last-known activity untouched (the server only overwrites when sent).
+prompt = (payload.get("prompt") or "").strip()
+if event == "UserPromptSubmit" and prompt:
+    body["activity"] = prompt.splitlines()[0][:80]
 try:
     req = urllib.request.Request(
         site + "/agent/report",
