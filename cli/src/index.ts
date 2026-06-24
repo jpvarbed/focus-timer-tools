@@ -46,8 +46,9 @@ const q = (name: string) => makeFunctionReference<"query">(name);
 const mut = (name: string) => makeFunctionReference<"mutation">(name);
 
 const USAGE =
-  "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|\n" +
-  "             fleet|report agent= project= [state=] [task=]|ask agent= [severity=] \"q\">";
+  "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|fleet|\n" +
+  "             report agent= project= [state=] [task=]|ask agent= [severity=] \"q\"|\n" +
+  "             decide \"…\" [cites=knowledge:a,…]|recall \"…\"|learn \"Title\" body=…>";
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -95,7 +96,7 @@ async function main() {
     process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "https://perceptive-butterfly-406.convex.cloud";
   // Agent-write commands authenticate with FOCUS_API_KEY (handled by agentPost); only the
   // control/read commands need the owner id.
-  const AGENT_CMDS = new Set(["report", "ask", "learn", "recall"]);
+  const AGENT_CMDS = new Set(["report", "ask", "learn", "recall", "decide"]);
   const userId = process.env.FOCUS_USER_ID ?? "";
   if (!AGENT_CMDS.has(cmd) && !userId) {
     console.error(
@@ -182,6 +183,28 @@ async function main() {
         agentId: kv.agent, severity: kv.severity ?? "soft", ...(question ? { question } : {}),
       });
       console.log(`raised ${kv.severity ?? "soft"} ask for ${kv.agent}`);
+      break;
+    }
+    case "decide": {
+      // Record a decision at a real fork, citing the knowledge that informed it (FOC-31). The
+      // cited concepts become INFORMS edges in the graph — the lineage the projection exists for.
+      const kv = parseKv(rest);
+      const summary = rest.filter((a) => !a.includes("=")).join(" ") || kv.summary;
+      if (!summary) {
+        console.error('usage: focus decide "what you decided" [cites=knowledge:a,knowledge:b] [agent=<id>] [project=p]');
+        process.exit(1);
+      }
+      const refs = (kv.cites ? kv.cites.split(",") : [])
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((target) => ({ type: "informs", target }));
+      const r = await agentPost<{ knowledgeGap: boolean }>("event", {
+        agentId: kv.agent ?? "cli",
+        type: "decision",
+        summary,
+        refs,
+      });
+      console.log(`recorded decision${r.knowledgeGap ? " (⚠ no knowledge cited — add cites=knowledge:<slug>)" : ""}`);
       break;
     }
     case "recall": {
