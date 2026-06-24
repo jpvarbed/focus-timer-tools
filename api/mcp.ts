@@ -11,7 +11,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
-const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);
 

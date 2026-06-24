@@ -6,7 +6,7 @@ import { makeFunctionReference } from "convex/server";
 // The focus.jasonv.dev Convex deployment (public client URL). Override with CONVEX_URL.
 export const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
 // Agent-write surface: keyed /agent/* endpoints on the .convex.site host (FOC-24/25).
-const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
 
 const q = (name: string) => makeFunctionReference<"query">(name);
 const m = (name: string) => makeFunctionReference<"mutation">(name);

@@ -22,7 +22,7 @@ if not key:
     sys.exit(0)  # no key configured -> silently do nothing
 
 # The .convex.site HTTP host (NOT .convex.cloud). Defaults to the auth-enabled deployment.
-site = os.environ.get("FOCUS_CONVEX_SITE", "https://vivid-ant-124.convex.site").rstrip("/")
+site = os.environ.get("FOCUS_CONVEX_SITE", "https://perceptive-butterfly-406.convex.site").rstrip("/")
 
 try:
     payload = json.load(sys.stdin)

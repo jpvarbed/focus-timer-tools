@@ -21,7 +21,7 @@ import { ConvexHttpClient, ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 // Agent-write surface: keyed HTTP endpoints on the .convex.site host (FOC-24/25).
-const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://vivid-ant-124.convex.site";
+const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
 const FOCUS_KEY = process.env.FOCUS_API_KEY ?? "";
 async function agentPost<T>(path: string, body: unknown): Promise<T> {
   if (!FOCUS_KEY) {
