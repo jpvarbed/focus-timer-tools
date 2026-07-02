@@ -64,10 +64,10 @@ Both use `FOCUS_API_KEY`, never block CC (no key → no-op, errors swallowed, 3s
 
 ## 4. Read the fleet / drive the timer
 
-Read the live board on the web (**focus.jasonv.dev**, after login) or the Explorer (below). The CLI's
-`status`/`start`/`stats`/`fleet`/`config` commands still use the pre-auth `FOCUS_USER_ID` model and do
-**not** work against the auth-gated prod deployment yet — a keyed owner-control surface is the pending
-slice. Until then, use the web/Explorer for reads and the timer.
+`bun "$FOC" fleet` shows the live board (keyed read, no `FOCUS_USER_ID`). The **timer control + stats**
+commands (`status`/`start`/`pause`/`resume`/`skip`/`reset`/`stats`/`config`) still use the pre-auth
+`FOCUS_USER_ID` model and do **not** work against the auth-gated prod deployment yet — a keyed
+owner-control surface is the pending slice. Drive the timer on the web (**focus.jasonv.dev**) meanwhile.
 
 ## 5. Explore the provenance graph
 
@@ -93,7 +93,7 @@ itself; the reasoning lineage is the part you record.
 | Agent writes 401 / silently no-op | `FOCUS_API_KEY` unset — mint one (focus → Settings) and export it. GUI apps that miss it need the `dev.jasonv.focus-key` LaunchAgent loaded (or relaunch from a terminal that sourced `~/.zshrc`). |
 | `bws` empty / key won't load | The bws token is read transiently from `~/dev/.env.local` — confirm that file holds `BWS_ACCESS_TOKEN`. |
 | `bun "$FOC" …`: command/module not found | Clone `~/dev/focus-timer-tools` + `bun install` once. |
-| `status`/`start`/`fleet` fail | Expected — those aren't key-native yet (see §4). Read via the web/Explorer. |
+| `status`/`start`/`stats`/`config` fail | Expected — timer control isn't key-native yet (see §4). Use the web. (`fleet` works — keyed.) |
 | `decide` logged as a knowledge-gap | Give a real cite: `recall` → `learn` if new → `decide "…" cites=knowledge:<slug>`. |
 | Explorer blank / stale | Sign out + reconnect (deployment defaults to prod, paste your key). Hard-refresh if cached. |
 

@@ -40,6 +40,19 @@ async function agentPost<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function agentGet<T>(path: string): Promise<T> {
+  if (!FOCUS_KEY) {
+    console.error("Set FOCUS_API_KEY (focus web → Settings → Mint key) for agent commands.");
+    process.exit(1);
+  }
+  const res = await fetch(`${FOCUS_SITE}/agent/${path}`, { headers: { Authorization: `Bearer ${FOCUS_KEY}` } });
+  if (!res.ok) {
+    console.error(`agent request failed (${res.status}): ${await res.text()}`);
+    process.exit(1);
+  }
+  return (await res.json()) as T;
+}
+
 // String refs ("file:export") work without codegen. Swap to the typed `api` from
 // `@focus/backend/api` after `convex dev` if you want arg/return type-safety here.
 const q = (name: string) => makeFunctionReference<"query">(name);
@@ -97,7 +110,7 @@ async function main() {
     process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "https://perceptive-butterfly-406.convex.cloud";
   // Agent-write commands authenticate with FOCUS_API_KEY (handled by agentPost); only the
   // control/read commands need the owner id.
-  const AGENT_CMDS = new Set(["report", "ask", "learn", "recall", "decide"]);
+  const AGENT_CMDS = new Set(["report", "ask", "learn", "recall", "decide", "fleet"]);
   const userId = process.env.FOCUS_USER_ID ?? "";
   if (!AGENT_CMDS.has(cmd) && !userId) {
     console.error(
@@ -145,19 +158,19 @@ async function main() {
       break;
     }
     case "fleet": {
-      const agents = (await http.query(q("fleet:list"), { userId })) as Array<{
-        agentId: string; project: string; state: string; taskTitle: string | null;
-      }>;
-      const asks = (await http.query(q("fleet:asks"), { userId })) as {
-        surfaced: Array<{ agentId: string; question?: string; severity: string }>; held: unknown[];
-      };
-      if (!agents.length) {
+      // Keyed read (FOC-28): GET /agent/fleet → owner from the key, no FOCUS_USER_ID needed.
+      const { agents, asks } = await agentGet<{
+        agents: Array<{ agentId: string; project: string; state: string; taskTitle: string | null; activity: string | null }>;
+        asks: { surfaced: Array<{ agentId: string; question?: string; severity: string }>; held: unknown[] };
+      }>("fleet");
+      const live = agents.filter((a) => a.state !== "done");
+      if (!live.length) {
         console.log("No agents reporting.");
         break;
       }
-      for (const a of agents) console.log(`· ${a.project}${a.taskTitle ? "/" + a.taskTitle : ""} — ${a.agentId} [${a.state}]`);
+      for (const a of live) console.log(`· ${a.project}${a.taskTitle ? "/" + a.taskTitle : ""} — ${a.agentId} [${a.state}]${a.activity ? " · " + a.activity : ""}`);
       for (const x of asks.surfaced) console.log(`  ! ${x.agentId}: ${x.question ?? "(needs a decision)"} [${x.severity}]`);
-      console.log(`(${asks.held.length} held)`);
+      console.log(`(${asks.held.length} held · ${agents.length - live.length} done)`);
       break;
     }
     case "report": {
