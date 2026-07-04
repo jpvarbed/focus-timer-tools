@@ -1,8 +1,8 @@
 # Build your exo-brain
 
-A fleet running for two weeks captured 327 sessions and 91 commits on its own, and linked exactly
-zero of its decisions to the reasoning behind them. That gap is the difference between a log and an
-exo-brain, and closing it takes one command.
+A fleet running for two weeks captured 327 sessions and 91 commits without anyone lifting a finger,
+and recorded 7 decisions by hand. That gap, between what the graph fills in for you and the little you
+write down yourself, is the difference between a log and an exo-brain.
 
 Wire the hooks (see [GETTING_STARTED](GETTING_STARTED.md)) and half the graph fills itself: every
 session, every commit, every project, no effort from you. The other half you record on purpose, and
@@ -19,13 +19,16 @@ Here is an actual fleet after two weeks of daily use:
 
 - 327 agent sessions across 7 projects
 - 91 commits, captured hands-free
-- 7 decisions, 6 knowledge concepts
-- 0 links between them
+- 7 decisions, each cited to a concept
+- 6 knowledge concepts
 
-The automatic layer is full. The deliberate layer is thin, and nothing connects a decision to the
-knowledge behind it, so the graph knows what happened but not why. And 302 of those 327 sessions
-landed in a single project bucket, because the agents ran from a home directory instead of a named
-repo. Name your projects and that doesn't happen to you.
+The automatic layer is full. The deliberate layer is tiny: seven decisions in two weeks, every one
+of them from building this tool itself. The hundreds of sessions across the other projects recorded
+not a single decision, because a decision exists only when someone runs the command, and the command
+is easy to forget. The seven that got recorded are each wired to the concept behind them, so the
+lineage works. There is just very little of it. One more thing to fix early: 302 of those 327
+sessions landed in a single project bucket, because the agents ran from a home directory instead of a
+named repo. Name your projects and that doesn't happen to you.
 
 ## The six node types
 
@@ -87,8 +90,9 @@ the way it is and get the concept, the decision that applied it, and the commits
 one connected thread. The hooks cannot infer this for you, because only you know what you were
 choosing between.
 
-In the example graph that edge is drawn zero times out of seven decisions. The concepts exist. The
-decisions exist. The wire between them is missing. Cite as you go and yours won't be.
+In the example graph every one of the seven decisions is wired this way, so the lineage is sound. The
+problem there is not missing links. It is that seven is a small number for two weeks of heavy use.
+Record the decision when you make it. That is the habit that fills the graph.
 
 ## Conventions that keep it legible
 
