@@ -121,6 +121,9 @@ Your decisions, events, learned concepts, and commits link into a knowledge grap
 `FOCUS_API_KEY` — it reads your data live through the keyed API, so it never needs database
 credentials.
 
+New to the idea? **[Build your exo-brain](EXO_BRAIN.md)** explains each node type and the one habit —
+citing decisions to the knowledge behind them — that decides whether the graph is worth querying later.
+
 ---
 
 ## Troubleshooting

@@ -9,7 +9,8 @@ The app itself (web + Convex backend) lives in a separate private repo. These to
 public Convex deployment.
 
 > **New here?** Follow **[GETTING_STARTED.md](GETTING_STARTED.md)** — sign in, mint a key, and wire
-> your agents in ~5 minutes.
+> your agents in ~5 minutes. Then **[EXO_BRAIN.md](EXO_BRAIN.md)** — what to actually capture so the
+> provenance graph is worth querying later.
 
 ## Install the skill
 
