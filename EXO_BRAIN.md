@@ -102,6 +102,14 @@ Record the decision when you make it. That is the habit that fills the graph.
   call is signal.
 - Recall before you learn.
 
+## Backfill from your ADRs
+
+If you already keep ADRs (`docs/adr/NNNN-*.md`), you do not have to retype them. Run
+`bun scripts/ingest-decisions.ts --dry-run` to see what it would pull; drop `--dry-run` to load each
+ADR as a concept plus a decision that cites it, with the "Alternatives considered" as the road not
+taken. It is idempotent and rides the graph-sync schedule, so new ADRs land on their own. One run
+took the example graph from 7 hand-typed decisions to 29.
+
 ## About Neo4j
 
 You do not need a database for any of this. The [explorer](https://fleet-explorer.jasonv.app)
