@@ -84,6 +84,13 @@ HARD EXCLUSIONS — these are NOT decisions, never emit them:
   "leaving it as-is", "assuming without checking", "continuing to X", "not proceeding". A trivial
   negation means there was no real fork → OMIT it. This is the #1 false-positive pattern; be ruthless.
 - Mechanical/incidental picks (variable names, buffer sizes, clamp values, which command to run).
+- FIXING a bug or correcting a mistake — there was no real alternative to fixing it, so it is NOT a
+  fork. (Exception: only if two SUBSTANTIVE competing fixes were genuinely weighed.) "Fix the regex",
+  "correct the wrong number", "preserve underscores" → OMIT.
+- Routine git/repo mechanics (stash, rebase, push, commit, merge-order) and test/run orchestration
+  (foreground vs background, run it now, split the test) → OMIT.
+- The agent's choices about its OWN evaluation workflow (run the distiller, tighten the rubric, chunk
+  the input) — meta-process, not a product/architecture/strategy decision → OMIT.
 
 Precision over recall: when unsure whether something is a real product/architecture/strategy decision
 with a genuine competing alternative, OMIT it. Better to miss one than fabricate one.
