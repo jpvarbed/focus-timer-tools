@@ -86,7 +86,8 @@ function sections(md: string): Record<string, string> {
 type Parsed = {
   externalId: string;
   repo: string;
-  num: string;
+  source: "adr" | "plan";
+  label: string; // display id, e.g. "#0004" or "plan:backend"
   status: string;
   conceptTitle: string;
   conceptBody: string;
@@ -94,6 +95,14 @@ type Parsed = {
   rejected: string | null;
   contentHash: string;
 };
+
+function stripMd(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links → text
+    .replace(/[*`]/g, "") // strip bold/code marks; keep _ (identifiers like GOOGLE_API_KEY)
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 const INGEST_STATUS = /^(accepted|superseded|amended|rejected)/i;
 
@@ -122,10 +131,51 @@ function parseAdr(repo: string, file: string, raw: string): Parsed | null {
 
   return {
     externalId: `${repo}:adr-${num}`,
-    repo, num, status: statusRaw.toLowerCase(),
+    repo, source: "adr", label: `#${num}`, status: statusRaw.toLowerCase(),
     conceptTitle, conceptBody: body, decisionSummary, rejected,
     contentHash: hash(raw),
   };
+}
+
+/** Parse `# | Decision | Choice | Why` decision-log tables in a PLAN/SPEC doc. The `Decision` cell is
+ *  the topic, `Choice` is what was picked, `Why` the reasoning. Rows that reference an ADR are skipped
+ *  (the ADR pass already captured them). One decision per row, cited to a concept built from choice+why. */
+function parsePlanTables(repo: string, raw: string): Parsed[] {
+  const lines = raw.split("\n");
+  const out: Parsed[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const header = lines[i];
+    if (!/^\s*\|.*\bdecision\b.*\bchoice\b/i.test(header)) continue;
+    if (!/^\s*\|[\s:|-]+\|?\s*$/.test(lines[i + 1] ?? "")) continue; // needs a |---| separator row
+    const cols = header.split("|").map((c) => c.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+    const di = cols.findIndex((c) => /^decision$/i.test(c));
+    const ci = cols.findIndex((c) => /^choice$/i.test(c));
+    const wi = cols.findIndex((c) => /^why$/i.test(c));
+    if (di < 0 || ci < 0) continue;
+
+    for (let r = i + 2; r < lines.length; r++) {
+      const row = lines[r];
+      if (!/^\s*\|/.test(row)) break; // table ended
+      const cells = row.split("|").map((c) => c.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+      const topic = stripMd(cells[di] ?? "");
+      const choice = stripMd(cells[ci] ?? "");
+      const why = wi >= 0 ? stripMd(cells[wi] ?? "") : "";
+      if (!topic || !choice) continue;
+      if (/\badr[-\s/]?\d/i.test(cells[ci] ?? "") || /\badr[-\s/]?\d/i.test(cells[wi] ?? "")) continue; // ADR already has it
+
+      const conceptTitle = clamp(`${topic}: ${choice}`, 90);
+      out.push({
+        externalId: `${repo}:plan-${slugify(topic)}`,
+        repo, source: "plan", label: `plan:${slugify(topic).slice(0, 20)}`, status: "accepted",
+        conceptTitle,
+        conceptBody: clamp([`Choice: ${choice}`, why && `Why: ${why}`].filter(Boolean).join("\n\n"), 1400),
+        decisionSummary: clamp(`${topic}: ${choice}`, 240),
+        rejected: null,
+        contentHash: hash(`${topic}|${choice}|${why}`),
+      });
+    }
+  }
+  return out;
 }
 
 async function main() {
@@ -133,48 +183,61 @@ async function main() {
     console.error("Set FOCUS_API_KEY (focus web → Settings → Mint key), or pass --dry-run.");
     process.exit(1);
   }
-  const glob = new Glob("*/docs/adr/*.md");
-  const files: string[] = [];
-  for await (const f of glob.scan({ cwd: ROOT, onlyFiles: true })) files.push(join(ROOT, f));
-  files.sort();
+  const collect = async (pattern: string) => {
+    const files: string[] = [];
+    for await (const f of new Glob(pattern).scan({ cwd: ROOT, onlyFiles: true })) files.push(join(ROOT, f));
+    return files.filter((f) => !f.includes("node_modules")).sort();
+  };
+  const adrFiles = await collect("*/docs/adr/*.md");
+  const planFiles = await collect("*/{PLAN,SPEC,BRIEF}.md");
 
   const state = loadState();
   const parsed: Parsed[] = [];
   let skippedStatus = 0;
-  for (const f of files) {
+  for (const f of adrFiles) {
     const repo = f.slice(ROOT.length + 1).split("/")[0];
-    if (repo.includes("node_modules")) continue;
     const p = parseAdr(repo, f, readFileSync(f, "utf8"));
     if (p) parsed.push(p);
     else skippedStatus++;
   }
+  for (const f of planFiles) {
+    const repo = f.slice(ROOT.length + 1).split("/")[0];
+    parsed.push(...parsePlanTables(repo, readFileSync(f, "utf8")));
+  }
+  const adrN = parsed.filter((p) => p.source === "adr").length;
+  const planN = parsed.filter((p) => p.source === "plan").length;
 
-  console.log(`Found ${files.length} ADR files under ${ROOT} — ${parsed.length} ingestable, ${skippedStatus} skipped (status/parse).\n`);
+  console.log(`Scanned ${adrFiles.length} ADRs + ${planFiles.length} PLAN/SPEC docs under ${ROOT} — ` +
+    `${adrN} ADR + ${planN} table decisions ingestable, ${skippedStatus} skipped (status/parse).\n`);
 
   let created = 0, already = 0;
   for (const p of parsed) {
+    // Idempotency keys on the ADR's IDENTITY (externalId), never its content. A decision is recorded
+    // once per ADR, full stop — editing the ADR text must NOT spawn a new decision (that bug re-emits
+    // an actively-edited ADR every sync cycle; it polluted the graph with 100+ dupes of 2 ADRs). Use
+    // --force to deliberately re-ingest.
     const seen = state.ingested[p.externalId];
-    const isNew = FORCE || !seen || seen.hash !== p.contentHash;
-    const tag = isNew ? (seen ? "UPDATE" : "NEW   ") : "have  ";
+    const isNew = FORCE || !seen;
+    const tag = isNew ? (seen ? "RE-ADD" : "NEW   ") : "have  ";
     if (!isNew) { already++; continue; }
 
     if (DRY) {
-      console.log(`  ${tag} [${p.repo} #${p.num}] ${p.decisionSummary}`);
-      console.log(`         cites → knowledge:${slugify(p.conceptTitle)}${p.rejected ? "" : "   (no alternative parsed)"}`);
+      console.log(`  ${tag} [${p.repo} ${p.label}] ${p.decisionSummary}`);
+      console.log(`         cites → knowledge:${slugify(p.conceptTitle)}${p.rejected ? `   (over: ${p.rejected})` : ""}`);
       created++;
       continue;
     }
 
     // Real run: upsert the concept, then record the decision citing the slug the server returns.
     const k = await post<{ slug: string; created: boolean }>("knowledge/upsert", {
-      title: p.conceptTitle, body: p.conceptBody, tags: ["adr", p.repo, p.status.split("-")[0]], project: p.repo,
+      title: p.conceptTitle, body: p.conceptBody, tags: [p.source, p.repo, p.status.split("-")[0]], project: p.repo,
     });
     const d = await post<{ knowledgeGap: boolean }>("event", {
-      agentId: "adr-ingest", type: "decision", summary: p.decisionSummary,
+      agentId: `${p.source}-ingest`, type: "decision", summary: p.decisionSummary,
       refs: [{ type: "informs", target: `knowledge:${k.slug}` }],
     });
     state.ingested[p.externalId] = { hash: p.contentHash, slug: k.slug, ts: Date.now() };
-    console.log(`  ${tag} [${p.repo} #${p.num}] → decision cites knowledge:${k.slug}${d.knowledgeGap ? " ⚠gap" : ""}`);
+    console.log(`  ${tag} [${p.repo} ${p.label}] → decision cites knowledge:${k.slug}${d.knowledgeGap ? " ⚠gap" : ""}`);
     created++;
   }
 
