@@ -1,0 +1,17 @@
+{
+  "replayed": false,
+  "schemaVersion": 1,
+  "collector": { "name": "file-decision", "version": "1.0.0" },
+  "envelopeId": "env_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "clientKey": "op_fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "serverDigest": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+  "results": [
+    {
+      "op": "decision.create",
+      "assertionId": "assertion-placeholder-0001",
+      "revisionId": "revision-placeholder-0001",
+      "currentActiveRevisionId": "revision-placeholder-0001"
+    }
+  ],
+  "provenanceEventIds": ["provenance-event-placeholder-0001"]
+}
