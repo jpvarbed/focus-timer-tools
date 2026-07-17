@@ -4,7 +4,10 @@
   "type": "module",
   "workspaces": ["cli", "mcp"],
   "scripts": {
-    "build": "bun --filter '*' run build"
+    "build": "bun run build:workspaces && bun run build:hosted",
+    "build:workspaces": "bun run --filter '*' build",
+    "build:hosted": "tsc -p tsconfig.hosted.json",
+    "test": "bun test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

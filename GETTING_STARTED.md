@@ -15,8 +15,8 @@ You need: [Bun](https://bun.sh) installed, and (for the auto-reporting hooks) a 
    link, no password.
 2. Open **Settings → API keys → Mint key**. Copy the `ak_…` key. **It's shown once.**
 
-That key *is* your identity for agents. The owner is derived from it server-side, it's write-only to
-your own fleet, and you can revoke it anytime from the same panel.
+That key *is* your identity for agents. The owner is derived from it server-side, its reads and
+writes are scoped to your Focus data, and you can revoke it anytime from the same panel.
 
 ## 2. Clone the tools and install
 
@@ -56,6 +56,32 @@ bun "$FOC" recall "how did we handle X"              # find prior knowledge to c
 bun "$FOC" learn  "Title" body="…" tags=a,b          # capture a concept → knowledge:<slug>
 bun "$FOC" decide "what you chose" cites=knowledge:<slug>   # records the decision → knowledge lineage
 ```
+
+For durable, correctable repository decisions, use the source-cited pipeline:
+
+```bash
+bun "$FOC" collect decision file=docs/decisions.md lines=12:14 action=create \
+  text="Use Focus as the durable memory home." actor=codex confirm=true
+# First sync only, after checking FOCUS_API_KEY points at the intended account:
+bun "$FOC" sync bind-owner=true
+# Every later sync verifies the stored owner binding:
+bun "$FOC" sync
+bun "$FOC" recall-decisions query="durable memory"
+bun "$FOC" collector-status
+bun "$FOC" receipt env_<id>
+```
+
+Collection is explicit. The file must be tracked and clean, HEAD must be attached to a named branch,
+and the repository must have one safe `origin`. The collector stores an exact file hash, commit,
+and line range in an append-only local envelope. Deterministic ETL sends it to Focus; Focus remains
+the only lifecycle authority and Neo4j remains read-only.
+
+`origin` is locally configured identity, not remote-host attestation. The decision text is a
+confirmed interpretation of the cited range, not an implied verbatim quote. Sync does not depend on
+the later checkout and will not archive pending evidence unless the server receipt matches the
+collector, envelope, client key, ordered operations, and provenance count. The first sync writes an
+opaque owner binding to the local spool. Later syncs fail closed if the configured API key belongs
+to anyone else; they never submit or archive those pending envelopes.
 
 `decide` with a `cites=` is the one thing that can't be captured automatically — it's the edge that
 turns the graph from "what happened" into "why". Everything else fills itself in (below).
@@ -112,7 +138,8 @@ Prefer to give an agent the tools directly?
 
 **Hosted:** point your MCP client at `https://mcp.jasonv.dev/api/mcp` and send
 `Authorization: Bearer ak_…`. Tools: `focus_report`, `focus_ask`, `focus_event`, `focus_recall`,
-`focus_learn` (+ timer tools).
+`focus_learn`, `focus_search_decisions`, `focus_ingest_receipt` (+ timer tools). Repository capture
+and sync remain local-only because the hosted MCP has no trusted local filesystem/Git adapter.
 
 ## 7. Explore the graph
 
@@ -136,5 +163,5 @@ citing decisions to the knowledge behind them — that decides whether the graph
 | Desktop/IDE app reports nothing | GUI apps don't inherit your shell env — inject `FOCUS_API_KEY` into the app's launch environment and relaunch (see step 5). |
 | Explorer blank | Reconnect and paste your key; hard-refresh if it's cached. |
 
-Rate limits are per account (a tight cap on embedding calls, ~100/hr, and 25 active keys) so an
-open account can't run up a bill — well above normal use, but there if you loop.
+Rate limits are per account, and accounts may have at most 25 active keys. Recall is Convex
+full-text; there is no model or embedding bill.

@@ -8,6 +8,16 @@
  *
  * Env: FOCUS_API_KEY (required) · FOCUS_CONVEX_SITE (defaults to the prod deployment's .convex.site).
  */
+import {
+  FocusHttpClient,
+  collectFactoryRun,
+  collectFileDecision,
+  collectorStatus,
+  deriveRepositoryScope,
+  readLocalReceipt,
+  resolveDecisionTarget,
+  syncPending,
+} from "../../memory/pipeline";
 
 const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
 const FOCUS_KEY = process.env.FOCUS_API_KEY ?? "";
@@ -38,7 +48,9 @@ async function agentGet<T>(path: string): Promise<T> {
 const USAGE =
   "usage: focus <status|start [label]|pause|resume|skip|reset|stats|config k=v…|watch|fleet|\n" +
   "             report agent= project= [state=] [task=]|ask agent= [severity=] \"q\"|\n" +
-  "             decide \"…\" [cites=knowledge:a,…]|recall \"…\"|learn \"Title\" body=…>";
+  "             decide \"…\" [cites=knowledge:a,…]|recall \"…\"|learn \"Title\" body=…|\n" +
+  "             collect decision|factory-run …|sync|recall-decisions query=…|\n" +
+  "             collector-status|receipt <envelopeId>>";
 
 type TimerView = {
   phase: "focus" | "short_break" | "long_break";
@@ -69,7 +81,24 @@ const timer = () => agentGet<TimerView>("timer");
 // decision summary "Provenance = hybrid" — is NOT a flag, so match only a leading `word=`.
 const isFlag = (a: string) => /^[a-zA-Z][\w-]*=/.test(a);
 function parseKv(args: string[]): Record<string, string> {
-  return Object.fromEntries(args.filter(isFlag).map((a) => a.split("=", 2) as [string, string]));
+  return Object.fromEntries(args.filter(isFlag).map((argument) => {
+    const separator = argument.indexOf("=");
+    return [argument.slice(0, separator), argument.slice(separator + 1)];
+  }));
+}
+
+function confirmed(args: string[], kv: Record<string, string>): boolean {
+  return args.includes("--confirm") || kv.confirm === "true";
+}
+
+function lineRange(kv: Record<string, string>): { lineStart: number; lineEnd: number } {
+  const parts = kv.lines?.split(":");
+  const lineStart = Number(kv.lineStart ?? parts?.[0]);
+  const lineEnd = Number(kv.lineEnd ?? parts?.[1] ?? parts?.[0]);
+  if (!Number.isInteger(lineStart) || !Number.isInteger(lineEnd)) {
+    throw new Error("collect decision requires lines=<start>:<end>");
+  }
+  return { lineStart, lineEnd };
 }
 
 async function main() {
@@ -183,6 +212,93 @@ async function main() {
         ...(kv.project ? { project: kv.project } : {}),
       });
       console.log(`${r.created ? "created" : "reused (" + r.reason + ")"} -> knowledge:${r.slug}`);
+      break;
+    }
+    case "collect": {
+      const [collector, ...collectorArgs] = rest;
+      const kv = parseKv(collectorArgs);
+      const spoolRoot = kv.spool;
+      if (collector === "decision") {
+        if (!kv.file) throw new Error("collect decision requires file=<path>");
+        const action = (kv.action ?? "create") as "create" | "correct" | "tombstone";
+        if (!["create", "correct", "tombstone"].includes(action)) throw new Error("invalid decision action");
+        const target = resolveDecisionTarget({
+          action,
+          ...(spoolRoot ? { spoolRoot } : {}),
+          ...(kv.receipt ? { priorEnvelopeId: kv.receipt } : {}),
+          ...(kv.assertionId ? { assertionId: kv.assertionId } : {}),
+          ...(kv.expectedActiveRevisionId ? { expectedActiveRevisionId: kv.expectedActiveRevisionId } : {}),
+        });
+        const envelope = await collectFileDecision({
+          cwd: kv.cwd ?? process.cwd(),
+          file: kv.file,
+          ...lineRange(kv),
+          ...target,
+          ...(kv.text ? { text: kv.text } : {}),
+          actor: kv.actor ?? "cli",
+          ...(kv.project ? { project: kv.project } : {}),
+          confirmed: confirmed(collectorArgs, kv),
+          ...(spoolRoot ? { spoolRoot } : {}),
+        });
+        console.log(JSON.stringify(envelope, null, 2));
+      } else if (collector === "factory-run") {
+        if (!kv.receipt) throw new Error("collect factory-run requires receipt=<path>");
+        const envelope = await collectFactoryRun({
+          receiptPath: kv.receipt,
+          actor: kv.actor ?? "factory-droid",
+          ...(kv.project ? { project: kv.project } : {}),
+          confirmed: confirmed(collectorArgs, kv),
+          ...(spoolRoot ? { spoolRoot } : {}),
+        });
+        console.log(JSON.stringify(envelope, null, 2));
+      } else {
+        throw new Error("usage: focus collect <decision|factory-run> ...");
+      }
+      break;
+    }
+    case "sync": {
+      const kv = parseKv(rest);
+      const client = new FocusHttpClient(FOCUS_SITE, FOCUS_KEY);
+      console.log(JSON.stringify(await syncPending({
+        ...(kv.spool ? { spoolRoot: kv.spool } : {}),
+        loader: client,
+        bindOwner: kv["bind-owner"] === "true",
+      }), null, 2));
+      break;
+    }
+    case "recall-decisions": {
+      const kv = parseKv(rest);
+      const queryText = kv.query ?? rest.filter((arg) => !isFlag(arg)).join(" ");
+      if (!queryText) throw new Error("recall-decisions requires query=<text>");
+      const scope = deriveRepositoryScope(kv.cwd ?? process.cwd());
+      const hits = await new FocusHttpClient(FOCUS_SITE, FOCUS_KEY).searchDecisions({
+        ...scope,
+        queryText,
+        ...(kv.limit ? { limit: Number(kv.limit) } : {}),
+      });
+      if (!hits.length) console.log("No matching decisions in this repository and branch.");
+      for (const hit of hits) {
+        console.log(
+          `${hit.assertionId}@${hit.revisionId} — ${hit.text}\n` +
+            `  ${hit.repository}/${hit.branch}:${hit.source.repoRelativePath}:${hit.source.lineStart}-${hit.source.lineEnd} ` +
+            `(${hit.source.sourceVersion.slice(0, 12)}, sha256:${hit.source.sha256.slice(0, 12)})`,
+        );
+      }
+      break;
+    }
+    case "collector-status": {
+      const kv = parseKv(rest);
+      console.log(JSON.stringify(collectorStatus(kv.spool), null, 2));
+      break;
+    }
+    case "receipt": {
+      const kv = parseKv(rest);
+      const envelopeId = rest.find((arg) => !isFlag(arg) && !arg.startsWith("--"));
+      if (!envelopeId) throw new Error("receipt requires an envelope id");
+      const local = readLocalReceipt(kv.spool, envelopeId);
+      const receipt = local ?? (await new FocusHttpClient(FOCUS_SITE, FOCUS_KEY).receipt(envelopeId));
+      if (!receipt) throw new Error(`receipt not found: ${envelopeId}`);
+      console.log(JSON.stringify(receipt, null, 2));
       break;
     }
     case "watch": {

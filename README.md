@@ -29,8 +29,8 @@ the `ak_…` key:
 export FOCUS_API_KEY=ak_your_key_here
 ```
 
-The owner is derived from the key server-side (no cleartext id), it's write-only to your own fleet,
-and it's one-click revocable. The endpoint defaults to the prod deployment; override with
+The owner is derived from the key server-side (no cleartext id), access is scoped to that owner's
+Focus reads and writes, and the key is one-click revocable. The endpoint defaults to the prod deployment; override with
 `FOCUS_CONVEX_SITE` only if you run your own backend.
 
 ## CLI
@@ -40,7 +40,44 @@ FOC=cli/src/index.ts
 bun run "$FOC" status
 # timer:  status · start [label] · pause · resume · skip · reset · stats · watch · config
 # fleet:  fleet · report · ask · recall · learn · decide
+# memory: collect decision|factory-run · sync · recall-decisions · collector-status · receipt
 ```
+
+### Durable memory: collector → ETL → Focus
+
+```text
+Factory / Codex / Claude / repository files
+                    ↓ explicit, pluggable collectors
+            append-only raw envelopes
+                    ↓ deterministic ETL
+             authenticated Focus loader
+                    ↓
+              Focus Convex (truth)
+                    ↓
+             Neo4j (read projection)
+```
+
+```bash
+# The cited file must be tracked, clean, on a named branch, with one safe origin.
+bun "$FOC" collect decision file=docs/decisions.md lines=12:14 action=create \
+  text="Use Focus as the durable memory home." actor=codex confirm=true
+# First sync only: verify the key, then bind this spool to its opaque Focus owner.
+bun "$FOC" sync bind-owner=true
+# Later syncs reject a different owner automatically.
+bun "$FOC" sync
+bun "$FOC" recall-decisions query="durable memory"
+bun "$FOC" collector-status
+bun "$FOC" receipt env_<id>
+```
+
+Correction and retirement take Focus IDs from a prior receipt; ETL never guesses a target by text.
+Factory receipts become provenance only, not decisions. There is no ambient transcript capture.
+The configured local `origin` supplies repository identity; it is not proof that the remote host
+advertises the commit. Collection proves the exact local commit/path/file hash with Git replacement
+objects disabled. Later sync validates the immutable envelope instead of depending on the current
+checkout, and archives it only after the server receipt matches every submitted operation. The
+spool stores only an opaque owner hash in `owner.json`; an unassigned spool requires explicit
+first-use binding, and a spool can never be loaded through a different Focus owner.
 
 ## MCP server
 
@@ -58,7 +95,10 @@ Add to your MCP client (Claude Desktop/Code):
 }
 ```
 
-Tools: `focus_report`, `focus_ask`, `focus_event`, `focus_recall`, `focus_learn`, plus the timer
+Local tools also expose `focus_collect`, `focus_sync_memory`, `focus_search_decisions`,
+`focus_collector_status`, and `focus_ingest_receipt`. The hosted MCP exposes decision recall and
+receipts but not a fake remote filesystem collector. Existing tools: `focus_report`, `focus_ask`,
+`focus_event`, `focus_recall`, `focus_learn`, plus the timer
 tools (`focus_status`, `focus_start`, `focus_pause`, `focus_resume`, `focus_skip`, `focus_reset`,
 `focus_stats`).
 

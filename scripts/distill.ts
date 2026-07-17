@@ -2,35 +2,58 @@
 /**
  * distill — extract material decisions from an agent session transcript into the focus graph (FOC-41).
  *
- * The structured rungs (ADRs, PLAN tables, council) capture the decisions that get written down. This
- * captures the ones that DON'T: the in-flight calls made mid-session. It reads a Claude Code transcript
- * (`.jsonl`), strips it to the actual conversation (user directives + assistant reasoning — tool spam
- * dropped), and asks an LLM to pull out each real decision as {what, why, rejected, principle, who,
- * evidence}. --write lands them as `learn` + `decide cites=` (deduped server-side, FOC-39).
+ * Originally an LLM extractor; converted to a DETERMINISTIC, quote-based extractor under FOC-40 /
+ * JAS-236: no model participates in ETL. Classification that cannot be done deterministically stays
+ * a pending candidate for explicit human/agent confirmation; nothing is guessed by a model.
+ *
+ * It reads a Claude Code transcript (`.jsonl`), strips it to the actual conversation (user directives
+ * + assistant reasoning — tool spam dropped), and surfaces candidate decision turns via lexical fork
+ * patterns. Every candidate carries a verbatim transcript quote; unquotable → dropped (precision-first).
+ * It never writes memory. Confirm a real decision against a repository file with
+ * `focus collect decision ... confirm=true`; the Focus loader owns lifecycle.
  *
  * PRECISION-FIRST (the cardinal rule): a fabricated decision poisons the corpus worse than a missed one.
- * Every extraction must quote a transcript span; unquotable → dropped. Materiality bar pinned 2026-07-05
- * (see notes/specs/foc-41-transcript-distiller.md).
+ * A deterministic extractor errs toward MISSING decisions (low recall) rather than fabricating them.
  *
- * Env: GOOGLE_API_KEY (extraction) · FOCUS_API_KEY + FOCUS_CONVEX_SITE (only for --write).
- * Usage: bun scripts/distill.ts <transcript.jsonl> [--write] [--model gemini-2.5-flash] [--chunk 100000]
+ * Usage: bun scripts/distill.ts <transcript.jsonl> [--chunk 100000]
  */
 import { readFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: string) => { const i = argv.indexOf(n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const WRITE = argv.includes("--write");
-const MODEL = flag("--model", "gemini-2.5-flash");
 const CHUNK = parseInt(flag("--chunk", "100000"), 10);
-const FILE = argv.find((a) => !a.startsWith("--") && a !== MODEL && a !== String(CHUNK));
-const GKEY = process.env.GOOGLE_API_KEY ?? "";
-const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
-const FOCUS_KEY = process.env.FOCUS_API_KEY ?? "";
+const FILE = argv.find((a) => !a.startsWith("--") && a !== String(CHUNK));
 
 const SECRET_RE = /\bak_[0-9a-zA-Z]{20,}|\bre_[0-9a-zA-Z]|BWS_ACCESS_TOKEN|-----BEGIN|xoxb-|ghp_|gho_/;
 
+// Lexical fork signals — a turn is a candidate decision if it contains one of these choice patterns.
+// Deliberately narrow: mechanical/workflow verbs ("let me check", "fix the regex") are NOT here.
+const FORK_PATTERNS: RegExp[] = [
+  /\b(let'?s|lets|we(?:'ll| will| should|'d)|I(?:'ll| will| should|'d))\b.*\b(use|go with|pick|choose|adopt|switch (?:to|from)|replace|drop|keep|avoid|prefer|ship|land|cut|scope|name|call it)\b/i,
+  /\binstead of\b/i,
+  /\brather than\b/i,
+  /\bover\b.*\b(as an? option|alternative|approach|option)\b/i,
+  /\bdecide[ds]?\b/i,
+  /\bdecision\b/i,
+  /\btrade-?off\b/i,
+];
+
+// Exclusions — workflow/mechanics narration that is NOT a product fork, even if it matches a fork word.
+const EXCLUDE_PATTERNS: RegExp[] = [
+  /\b(let me|let'?s (?:check|confirm|look|see|run|verify|test|debug|trace|inspect|read))\b/i,
+  /\b(stash|rebase|commit|push|merge|cherry-pick|checkout|pull)\b/i,
+  /\bfix (?:the |a |this )?[a-z]/i,
+  /\bcorrect(?:ing|ed)? (?:the |a |this )?[a-z]/i,
+];
+
+function isFork(text: string): boolean {
+  if (EXCLUDE_PATTERNS.some((re) => re.test(text))) return false;
+  return FORK_PATTERNS.some((re) => re.test(text));
+}
+
 // ---- transcript → clean conversation (drop tool_use/tool_result/attachments/system spam) ----
-function cleanTranscript(jsonl: string): string {
+export function cleanTranscript(jsonl: string): string {
   const turns: string[] = [];
   for (const line of jsonl.split("\n")) {
     if (!line.trim()) continue;
@@ -48,154 +71,73 @@ function cleanTranscript(jsonl: string): string {
     }
     text = text.trim();
     if (!text) continue;
-    // skip injected harness noise that isn't real conversation
     if (text.startsWith("<system-reminder>") || text.startsWith("Caveat:")) continue;
     turns.push(`### ${d.type}\n${text}`);
   }
   return turns.join("\n\n");
 }
 
-function chunkByTurns(convo: string, max: number): string[] {
-  const turns = convo.split("\n\n### ");
-  const chunks: string[] = [];
-  let cur = "";
-  for (let t of turns) {
-    if (!t.startsWith("###")) t = "### " + t;
-    if (cur.length + t.length > max && cur) { chunks.push(cur); cur = ""; }
-    cur += (cur ? "\n\n" : "") + t;
+type Candidate = {
+  who: "human" | "agent";
+  what: string;
+  evidence: string;
+};
+
+/** Deterministic extraction: a turn is a candidate decision iff it carries a lexical fork signal and
+ *  is not workflow narration. The "what" is the first sentence of the turn; the "evidence" is a
+ *  verbatim quote of the matching line. No model, no guessing. */
+export function extract(convo: string): Candidate[] {
+  const out: Candidate[] = [];
+  for (const block of convo.split(/\n\n### /)) {
+    const lines = block.split("\n");
+    const header = lines[0] ?? "";
+    const role = header.trim().replace(/^###\s+/, "");
+    const who: "human" | "agent" = role === "user" ? "human" : "agent";
+    const body = lines.slice(1).join("\n").trim();
+    if (!body) continue;
+    for (const line of body.split("\n")) {
+      const t = line.trim();
+      if (t.length < 8) continue;
+      if (isFork(t)) {
+        const what = t.split(/[.!?]/)[0]!.trim().slice(0, 160) || t.slice(0, 160);
+        out.push({ who, what, evidence: t.slice(0, 160) });
+        break; // one candidate per turn — the first fork line is the strongest signal
+      }
+    }
   }
-  if (cur) chunks.push(cur);
-  return chunks;
-}
-
-const RUBRIC = `You extract MATERIAL DECISIONS from a coding-agent session transcript, to build an exo-brain
-that lets an agent make the calls this person (Jason) would make. Precision matters far more than recall:
-a fabricated decision is worse than a missed one.
-
-A DECISION is a choice about WHAT or HOW to build/operate/ship — an architecture, tool, API, design,
-tradeoff, scope cut, or strategy call ("ship to prod now", "dedupe now instead of waiting"). The
-rejected alternative must be a SUBSTANTIVE, DIFFERENT approach that was genuinely on the table.
-
-HARD EXCLUSIONS — these are NOT decisions, never emit them:
-- The agent narrating its own WORKFLOW: investigating, debugging, reading code, tracing, verifying,
-  testing, diagnosing, "let me look at X", "let me confirm Y", cleaning up, git stash/rebase/push,
-  removing test data, sequencing ("do X first"). This is HOW the work got done, not a fork in the product.
-- Any "decision" whose rejected alternative is just the NEGATION of the action — "not doing it",
-  "leaving it as-is", "assuming without checking", "continuing to X", "not proceeding". A trivial
-  negation means there was no real fork → OMIT it. This is the #1 false-positive pattern; be ruthless.
-- Mechanical/incidental picks (variable names, buffer sizes, clamp values, which command to run).
-- FIXING a bug or correcting a mistake — there was no real alternative to fixing it, so it is NOT a
-  fork. (Exception: only if two SUBSTANTIVE competing fixes were genuinely weighed.) "Fix the regex",
-  "correct the wrong number", "preserve underscores" → OMIT.
-- Routine git/repo mechanics (stash, rebase, push, commit, merge-order) and test/run orchestration
-  (foreground vs background, run it now, split the test) → OMIT.
-- The agent's choices about its OWN evaluation workflow (run the distiller, tighten the rubric, chunk
-  the input) — meta-process, not a product/architecture/strategy decision → OMIT.
-
-Precision over recall: when unsure whether something is a real product/architecture/strategy decision
-with a genuine competing alternative, OMIT it. Better to miss one than fabricate one.
-
-ATTRIBUTION: label who ORIGINATED the choice. If the agent recommended X and Jason just approved ("yeah
-do it", "sounds good"), who = "agent-endorsed" — NOT "human". Use "human" only when Jason specified the
-actual choice himself.
-
-For each decision return:
-- what: the decision, one line (what was chosen).
-- why: the reason it was chosen (from the transcript, not invented).
-- rejected: the alternative not taken (or "" if none was named/implied).
-- principle: the generalizable rule it reveals (e.g. "idempotency keys on identity, not mutable content")
-  ONLY if clearly stated or strongly implied; else null. NEVER invent a principle.
-- principle_confidence: "high" | "low" | null (null when principle is null).
-- who: "human" (Jason directed it) | "agent" (the assistant decided) | "agent-endorsed" (agent decided, Jason blessed it).
-- evidence: a SHORT verbatim quote (<=160 chars) from the transcript that supports this decision. If you
-  cannot quote supporting text, DO NOT emit the decision. This is mandatory.
-
-Return ONLY the decisions that clear this bar.`;
-
-async function extract(chunk: string): Promise<any[]> {
-  const schema = {
-    type: "array",
-    items: {
-      type: "object",
-      properties: {
-        what: { type: "string" }, why: { type: "string" }, rejected: { type: "string" },
-        principle: { type: "string", nullable: true }, principle_confidence: { type: "string", nullable: true },
-        who: { type: "string" }, evidence: { type: "string" },
-      },
-      required: ["what", "why", "rejected", "who", "evidence"],
-    },
-  };
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GKEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: RUBRIC }] },
-        contents: [{ role: "user", parts: [{ text: `TRANSCRIPT CHUNK:\n\n${chunk}` }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.1 },
-      }),
-    },
-  );
-  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = (await res.json()) as any;
-  const txt = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
-  try { return JSON.parse(txt); } catch { return []; }
-}
-
-async function agentPost(path: string, body: unknown): Promise<any> {
-  const res = await fetch(`${FOCUS_SITE}/agent/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${FOCUS_KEY}` },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${path} ${res.status}: ${await res.text()}`);
-  return res.json();
+  return out;
 }
 
 async function main() {
-  if (!FILE) { console.error("usage: distill <transcript.jsonl> [--write]"); process.exit(1); }
-  if (!GKEY) { console.error("GOOGLE_API_KEY not set (bws)."); process.exit(1); }
-  if (WRITE && !FOCUS_KEY) { console.error("--write needs FOCUS_API_KEY."); process.exit(1); }
+  if (!FILE) { console.error("usage: distill <transcript.jsonl>"); process.exit(1); }
+  if (WRITE) {
+    throw new Error("--write is retired: transcript candidates are not durable memory; use focus collect decision with a source file");
+  }
 
   const convo = cleanTranscript(readFileSync(FILE, "utf8"));
-  const chunks = chunkByTurns(convo, CHUNK);
-  console.error(`transcript → ${convo.length} chars of conversation → ${chunks.length} chunk(s)`);
+  console.error(`transcript → ${convo.length} chars of conversation`);
 
-  const all: any[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    process.stderr.write(`  extracting chunk ${i + 1}/${chunks.length}…\n`);
-    try { all.push(...(await extract(chunks[i]))); } catch (e: any) { console.error(`  chunk ${i + 1} failed: ${e.message}`); }
-  }
+  const all = extract(convo);
 
   // anti-hallucination + secret gates
   const kept = all.filter((d) => {
-    if (!d.what || !d.evidence || d.evidence.length < 8) return false; // must quote evidence
+    if (!d.what || d.evidence.length < 8) return false;
     const blob = JSON.stringify(d);
-    if (SECRET_RE.test(blob)) return false; // never write a secret into the graph
+    if (SECRET_RE.test(blob)) return false;
     return true;
   });
 
-  console.log(`\n=== ${kept.length} material decisions (of ${all.length} raw) ===\n`);
+  console.log(`\n=== ${kept.length} candidate decisions (deterministic, pending confirmation) ===\n`);
   for (const d of kept) {
-    const p = d.principle ? `  ⟶ ${d.principle}${d.principle_confidence === "low" ? " (low-conf)" : ""}` : "";
     console.log(`• [${d.who}] ${d.what}`);
-    if (d.rejected) console.log(`    over: ${d.rejected}`);
-    if (p) console.log(p);
     console.log(`    ⌜${d.evidence.slice(0, 120)}⌟`);
   }
 
-  if (!WRITE) { console.log(`\n[dry-run] ${kept.length} would be written. Pass --write to land them.`); return; }
-
-  let wrote = 0;
-  for (const d of kept) {
-    const body = [d.why && `Why: ${d.why}`, d.rejected && `Rejected: ${d.rejected}`, d.principle && `Principle: ${d.principle}`]
-      .filter(Boolean).join("\n");
-    const k = await agentPost("knowledge/upsert", { title: d.what, body: body || d.what, tags: ["distilled", d.who], project: "session" });
-    await agentPost("event", { agentId: "distill", type: "decision", summary: d.what, refs: [{ type: "informs", target: `knowledge:${k.slug}` }] });
-    wrote++;
-  }
-  console.log(`\nwrote ${wrote} decisions to the graph (deduped server-side).`);
+  console.log(
+    `\n[dry-run] ${kept.length} candidates only. Durable memory requires an explicit, source-cited file-decision envelope.`,
+  );
 }
 
-main().catch((e) => { console.error("distill failed:", e.message); process.exit(1); });
+if (import.meta.main) {
+  main().catch((e) => { console.error("distill failed:", e.message); process.exit(1); });
+}

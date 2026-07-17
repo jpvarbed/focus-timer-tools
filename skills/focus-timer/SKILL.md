@@ -1,6 +1,6 @@
 ---
 name: focus-timer
-description: Report into Jason's cross-project agent fleet — presence, asks, decisions, knowledge — and explore the provenance graph it builds (focus.jasonv.dev). Use when an agent should report in, flag it needs Jason, or log a decision/concept, or when Jason wants to see the fleet or explore the knowledge graph. Works from ANY project; CLI + MCP + hooks are global. Not for env/dotfiles status — use `env-status-board`.
+description: Report into Jason's cross-project agent fleet, collect source-cited durable decisions into Focus, recall repository memory, and explore its Neo4j read projection. Use for agent presence/asks, explicit decision capture/correction/retirement, prior-memory recall, or graph exploration. Works from any Git project through the global CLI + MCP. Not for env/dotfiles status — use `env-status-board`.
 ---
 
 # Focus — attention orchestrator + provenance graph
@@ -17,7 +17,7 @@ single-source skill; it lives in the public tooling repo `~/dev/focus-timer-tool
 
 Agent writes authenticate with **`FOCUS_API_KEY`** — a minted `ak_…` key (focus web → Settings →
 Mint key). The owner is derived from the key server-side; no cleartext id is carried, and the key is
-write-only to the owner's fleet + one-click revocable.
+scoped to the owner's Focus reads and writes + one-click revocable.
 
 ```bash
 export FOCUS_API_KEY=$(bws secret list -o json | jq -r '.[]|select(.key=="FOCUS_API_KEY")|.value' | head -1)
@@ -51,7 +51,35 @@ Guidance for agents:
   point. A decision with no cite is logged as a knowledge-gap (recorded, not wired). **This is the one
   thing that can't be auto-captured** (reasoning can't be inferred), so it's on you to record it.
 
-## 3. Auto-report (no manual calls) — CC hooks
+## 3. Durable decision memory
+
+Focus/Convex is the only memory source of truth:
+
+```text
+explicit collector → append-only envelope → deterministic ETL → Focus → Neo4j read projection
+```
+
+```bash
+bun "$FOC" collect decision file=<tracked-file> lines=<start>:<end> action=create \
+  text="<confirmed decision>" actor=<agent-id> confirm=true
+bun "$FOC" sync bind-owner=true  # first sync only, after verifying the intended API key
+bun "$FOC" sync                  # later syncs enforce the stored owner binding
+bun "$FOC" recall-decisions query="<terms>"
+bun "$FOC" collector-status
+bun "$FOC" receipt <envelope-id>
+```
+
+For `action=correct|tombstone`, pass `receipt=<prior-envelope-id>`; the CLI copies the exact
+`assertionId` and active revision ID returned by Focus. Never search by text to guess a target.
+Collection rejects dirty files, detached HEAD, unsafe/missing origin identity, paths outside the
+repository, and invalid line ranges. Factory receipts use
+`collect factory-run receipt=<json> confirm=true` and become provenance only.
+
+MCP equivalents: `focus_collect`, `focus_sync_memory`, `focus_search_decisions`,
+`focus_collector_status`, `focus_ingest_receipt`. Hosted MCP exposes recall and receipts only;
+repository collection requires the local MCP.
+
+## 4. Auto-report (no manual calls) — CC hooks
 
 Two hooks wire into `~/.claude/settings.json` (scripts in `~/dev/focus-timer-tools/scripts`):
 - **Presence** — `cc-fleet-hook.py` (SessionStart/UserPromptSubmit→working, Notification→needs_you,
@@ -62,7 +90,7 @@ Two hooks wire into `~/.claude/settings.json` (scripts in `~/dev/focus-timer-too
 
 Both use `FOCUS_API_KEY`, never block CC (no key → no-op, errors swallowed, 3s timeout).
 
-## 4. Read the fleet / drive the timer
+## 5. Read the fleet / drive the timer
 
 The whole CLI is key-native now (FOC-33) — just `FOCUS_API_KEY`, no `FOCUS_USER_ID`:
 
@@ -75,9 +103,9 @@ bun "$FOC" config focus=25 short=5 long=15 interval=4 autostart=true
 The timer is server-owned and realtime with the web app; `watch` polls it live. (Everything routes
 through the keyed `/agent/*` layer — owner from the key.)
 
-## 5. Explore the provenance graph
+## 6. Explore the provenance graph
 
-The graph = Projects · Agents · Tasks · Events(decision/output) · Knowledge · Commits, linked by
+The graph = Projects · Agents · Tasks · Events · Knowledge · Decisions · Commits · Files, linked by
 `WORKS_IN / ON / CONTAINS / MADE / INFORMS / PRODUCES`. Three ways in:
 
 - **Explorer** (visual, filters): **https://fleet-explorer.jasonv.app** — connect with `FOCUS_API_KEY`;
@@ -89,8 +117,8 @@ The graph = Projects · Agents · Tasks · Events(decision/output) · Knowledge 
   `NEO4J_*` + `FOCUS_API_KEY`; `graph.ts sync` reprojects from Convex, auto-run every 15 min).
 
 What creates each node: **agents/projects/activity** + **commits** → automatic (the hooks); **tasks**
-→ a `report` with `task=`; **decisions** → `decide`; **knowledge** → `learn`. So the structure fills
-itself; the reasoning lineage is the part you record.
+→ a `report` with `task=`; lightweight decision events → `decide`; durable Decision nodes →
+the collector/ETL/Focus lifecycle; **knowledge** → `learn`. Neo4j is never a write path.
 
 ## Errors
 

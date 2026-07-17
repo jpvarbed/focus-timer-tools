@@ -3,12 +3,16 @@
 // Timer control/read tools identify the caller via the `x-focus-user` header; agent-write tools
 // (report/ask/event/recall/learn) authenticate with a minted key via `Authorization: Bearer ak_…`.
 //
-// Self-contained on purpose (no cross-workspace import) so the serverless bundle is simple.
+// Memory reads reuse the same runtime-validated client/contracts as local CLI/MCP. Other legacy
+// tools retain their existing transport while they migrate independently.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { FocusHttpClient } from "../memory/client";
+import { MAX_DECISION_SEARCH_RESULTS } from "../memory/policy";
+import { ENVELOPE_ID } from "../memory/contracts";
 
 const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
 const FOCUS_SITE = process.env.FOCUS_CONVEX_SITE ?? "https://perceptive-butterfly-406.convex.site";
@@ -47,10 +51,11 @@ function render(s: TimerView): string {
   return `${PHASE[s.phase]} ${fmt(live)} [${s.status}] · cycle ${s.cycleCount}/${s.config.longBreakInterval}${label}`;
 }
 
-function buildServer(userId: string, apiKey: string) {
+export function buildServer(userId: string, apiKey: string) {
   const client = new ConvexHttpClient(process.env.CONVEX_URL ?? DEFAULT_CONVEX_URL);
   const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
   const status = async () => render((await client.query(q("timer:get"), { userId })) as TimerView);
+  const memoryClient = new FocusHttpClient(FOCUS_SITE, apiKey);
 
   const server = new McpServer({ name: "focus-timer", version: "0.1.0" });
   server.tool("focus_status", "Show the current focus/break timer.", {}, async () => text(await status()));
@@ -128,10 +133,10 @@ function buildServer(userId: string, apiKey: string) {
     return text([...lines, ...(asky.length ? ["asks needing you:", ...asky] : []), `(${asks.held.length} held)`].join("\n"));
   });
 
-  // ---- knowledge (semantic) ----
+  // ---- knowledge (full-text) ----
   server.tool(
     "focus_recall",
-    "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
+    "Full-text search Jason's knowledge concepts. Use before making a decision to find prior knowledge to cite (knowledge:<slug>).",
     { query: z.string(), limit: z.number().optional() },
     async ({ query, limit }) => {
       const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
@@ -143,13 +148,42 @@ function buildServer(userId: string, apiKey: string) {
   );
   server.tool(
     "focus_learn",
-    "Record a knowledge concept (cite-or-create; dedups by slug + meaning). Returns the slug to cite in a decision's refs.",
+    "Record a knowledge concept (cite-or-create; exact slug dedupe). Returns the slug to cite in a decision's refs.",
     { title: z.string(), body: z.string(), tags: z.array(z.string()).optional(), project: z.string().optional() },
     async ({ title, body, tags, project }) => {
       const r = await agentPost<{ slug: string; created: boolean; reason?: string }>(
         apiKey, "knowledge/upsert", { title, body, ...(tags ? { tags } : {}), ...(project ? { project } : {}) },
       );
       return text(`${r.created ? "created" : "reused (" + r.reason + ")"} → knowledge:${r.slug}`);
+    },
+  );
+  server.tool(
+    "focus_search_decisions",
+    "Full-text recall of active decisions in one explicit repository and branch. Hosted MCP cannot collect local files.",
+    {
+      repository: z.string(),
+      branch: z.string(),
+      query: z.string(),
+      limit: z.number().int().positive().max(MAX_DECISION_SEARCH_RESULTS).optional(),
+    },
+    async ({ repository, branch, query, limit }) => {
+      const hits = await memoryClient.searchDecisions({
+        repository,
+        branch,
+        queryText: query,
+        ...(limit ? { limit } : {}),
+      });
+      return text(JSON.stringify(hits, null, 2));
+    },
+  );
+  server.tool(
+    "focus_ingest_receipt",
+    "Return the owner-scoped server verification receipt for a memory envelope.",
+    { envelopeId: z.string().regex(ENVELOPE_ID) },
+    async ({ envelopeId }) => {
+      const receipt = await memoryClient.receipt(envelopeId);
+      if (!receipt) throw new Error("receipt not found: " + envelopeId);
+      return text(JSON.stringify(receipt, null, 2));
     },
   );
   return server;

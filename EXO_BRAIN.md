@@ -13,6 +13,22 @@ into memory you can query later.
 The examples use `focus` as shorthand for `bun ~/dev/focus-timer-tools/cli/src/index.ts`. Alias it in
 your shell.
 
+## Where memory lives
+
+```text
+collector → raw envelope → deterministic ETL → Focus/Convex → optional Neo4j projection
+```
+
+Focus is the memory home. Collectors preserve evidence; ETL validates and normalizes it; neither is
+allowed to decide which revision is current. Neo4j is a disposable read projection. Durable
+repository decisions are explicit, branch-scoped, and cited to an exact file hash, Git commit, and
+line range. Corrections and retirement create immutable revisions using IDs from the prior receipt.
+The local spool keeps raw observation receipts; Focus accepts only the normalized authenticated load
+contract. A sync archives pending evidence only after the returned receipt is bound to that exact
+batch. On first use, `focus sync bind-owner=true` binds the local spool to the API key's opaque Focus
+owner; later syncs refuse a different owner before loading anything. Repository identity comes from
+local `origin` configuration and is not remote attestation.
+
 ## A real graph, two weeks in
 
 Here is an actual fleet after two weeks of daily use:
@@ -53,7 +69,8 @@ What actually shipped. The commit hook captures each one from git, along with th
 This is the concrete artifact a decision produced.
 
 ### Decision
-A fork you took, and the road you didn't. You record it with `focus decide`. A good decision names
+A fork you took, and the road you didn't. `focus decide` remains a lightweight provenance event.
+For durable, correctable memory, use `focus collect decision ...` and `focus sync`. A good decision names
 the alternative and the reason you passed on it. Real ones from the graph above:
 
 - Chose full auth over shipping the cleartext-userId version
@@ -104,11 +121,10 @@ Record the decision when you make it. That is the habit that fills the graph.
 
 ## Backfill from your ADRs
 
-If you already keep ADRs (`docs/adr/NNNN-*.md`), you do not have to retype them. Run
-`bun scripts/ingest-decisions.ts --dry-run` to see what it would pull; drop `--dry-run` to load each
-ADR as a concept plus a decision that cites it, with the "Alternatives considered" as the road not
-taken. It is idempotent and rides the graph-sync schedule, so new ADRs land on their own. One run
-took the example graph from 7 hand-typed decisions to 29.
+If you already keep ADRs (`docs/adr/NNNN-*.md`), collect each accepted decision from its exact
+tracked line range. Do not bulk-promote transcript guesses. `scripts/distill.ts` is a dry-run
+candidate finder only; durable memory still requires explicit confirmation and a source-cited
+`file-decision` envelope.
 
 ## About Neo4j
 

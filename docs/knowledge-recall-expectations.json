@@ -1,0 +1,14 @@
+[
+  {
+    "query": "Convex backend",
+    "expectedSlugs": ["adopt-convex-as-the-backend"]
+  },
+  {
+    "query": "auth gate",
+    "expectedSlugs": ["shared-secret-auth-gate-realizes-adr-0003-on-convex"]
+  },
+  {
+    "query": "static Vercel deploy",
+    "expectedSlugs": ["prebuilt-static-vercel-deploy-for-the-focus-web"]
+  }
+]
