@@ -109,6 +109,9 @@ const EventViewSchema = z
     summary: z.string(),
     refs: z.array(RefSchema),
     knowledgeGap: z.boolean(),
+    // Count of pre-allowlist legacy refs the server filtered at the read seam; reported after
+    // sync so the drop is never silent. Optional for servers predating the filter.
+    omittedLegacyRefs: z.number().int().safe().nonnegative().optional().transform((value) => value ?? 0),
     memoryVersion: z.number().int().safe().positive().nullable().optional().transform((value) => value ?? null),
   })
   .strict()
@@ -298,6 +301,10 @@ async function sync(driver: Driver) {
     console.log(
       `synced: ${agents.length} agents · ${tasks.length} tasks · ${genericEvents.length + decisionSnapshot.events.length} events · ${knowledge.length} concepts · ${decisionSnapshot.assertions.length} decisions @ ${decisionSnapshot.watermark}`,
     );
+    const omittedLegacyRefs = genericEvents.reduce((sum, event) => sum + event.omittedLegacyRefs, 0);
+    if (omittedLegacyRefs > 0) {
+      console.log(`note: server filtered ${omittedLegacyRefs} pre-allowlist legacy ref(s) at the read seam`);
+    }
   } finally {
     await s.close();
   }
