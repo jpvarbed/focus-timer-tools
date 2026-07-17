@@ -194,7 +194,7 @@ async function applyEvents(connection: GraphConnection, events: EventView[]): Pr
         if (!spec || !value) throw new Error(`unsupported or empty provenance target: ${ref.target}`);
         const [label, key] = spec;
         const rel = relType(ref.type);
-        const bucketKey = `${label}\\u0000${key}\\u0000${rel}`;
+        const bucketKey = `${label}\u0000${key}\u0000${rel}`;
         let bucket = buckets.get(bucketKey);
         if (!bucket) buckets.set(bucketKey, (bucket = { label, key, rel, pairs: [] }));
         bucket.pairs.push({ eventId: event._id, value });
@@ -280,7 +280,7 @@ async function sync(driver: Driver) {
       if (shouldApply) {
         await applyEvents(
           tx,
-          decisionSnapshot.events.map((event) => ({ ...event, memoryVersion: event.memoryVersion })),
+          decisionSnapshot.events,
         );
         await projectDecisionSnapshot(tx, decisionSnapshot);
       }
