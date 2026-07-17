@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.bun-build
+*.bun-build
 *.tsbuildinfo
 .env
 .env.local

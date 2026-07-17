@@ -1,0 +1,34 @@
+{
+  "sessionId": "014ca9cd-1a7a-4ac1-a425-1407405c970f",
+  "elapsedMs": 675052,
+  "toolCalls": 129,
+  "correctionPrompts": 0,
+  "tests": [
+    {
+      "command": "bun run test convex/memory/model.test.ts convex/decisionLifecycle.test.ts convex/knowledge.test.ts convex/knowledgeHelpers.test.ts",
+      "passed": true,
+      "count": 27
+    },
+    {
+      "command": "bun run test convex/noGoogleRuntime.test.ts",
+      "passed": true,
+      "count": 2
+    },
+    {
+      "command": "bun run test convex/agentMemoryHttp.test.ts",
+      "passed": true,
+      "count": 5
+    },
+    {
+      "command": "post-run root build",
+      "passed": false,
+      "count": 0
+    }
+  ],
+  "bugs": [
+    "Droid exhausted its premium-model budget and automatically switched to Droid Core during the run.",
+    "Droid exhausted its Droid Core quota while an intentional bearer-owner spoofing mutation was active and exited without reverting it.",
+    "Droid did not reach the collector, ETL, CLI, MCP, Neo4j, documentation, or final receipt slices.",
+    "Droid emitted no terminal implementation report; the steward recovered the state from the session JSONL and working tree."
+  ]
+}

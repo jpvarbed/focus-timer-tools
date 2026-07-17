@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { registerMemoryTools } from "./memoryTools.js";
 
 // The focus.jasonv.dev Convex deployment (public client URL). Override with CONVEX_URL.
 export const DEFAULT_CONVEX_URL = "https://perceptive-butterfly-406.convex.cloud";
@@ -141,10 +142,10 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string;
     return text([...lines, ...(asky.length ? ["asks needing you:", ...asky] : []), `(${asks.held.length} held)`].join("\n"));
   });
 
-  // ---- knowledge (semantic) ----
+  // ---- knowledge (full-text) ----
   server.tool(
     "focus_recall",
-    "Semantic search Jason's knowledge concepts. Use BEFORE making a decision to find prior knowledge to cite (knowledge:<slug>).",
+    "Full-text search Jason's knowledge concepts. Use before making a decision to find prior knowledge to cite (knowledge:<slug>).",
     { query: z.string(), limit: z.number().optional() },
     async ({ query, limit }) => {
       const hits = await agentPost<Array<{ slug: string; title: string; score: number }>>(
@@ -156,7 +157,7 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string;
   );
   server.tool(
     "focus_learn",
-    "Record a knowledge concept (cite-or-create; dedups by slug + meaning). Returns the slug to cite in a decision.",
+    "Record a knowledge concept (cite-or-create; exact slug dedupe). Returns the slug to cite in a decision.",
     { title: z.string(), body: z.string(), tags: z.array(z.string()).optional(), project: z.string().optional() },
     async ({ title, body, tags, project }) => {
       const r = await agentPost<{ slug: string; created: boolean; reason?: string }>(
@@ -165,6 +166,8 @@ export function buildServer(opts: { convexUrl?: string; getUserId: () => string;
       return text(`${r.created ? "created" : "reused (" + r.reason + ")"} → knowledge:${r.slug}`);
     },
   );
+
+  registerMemoryTools(server, opts.getKey);
 
   return server;
 }

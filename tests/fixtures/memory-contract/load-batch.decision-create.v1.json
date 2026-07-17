@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "collector": { "name": "file-decision", "version": "1.0.0" },
+  "envelopeId": "env_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "clientKey": "op_fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "operations": [
+    {
+      "op": "decision.create",
+      "repository": "github.com/jasonvarbedian/focus-timer",
+      "branch": "main",
+      "sourceRepoRelativePath": "docs/adr/0001-memory-contract.md",
+      "sourceSha256": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+      "sourceVersion": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+      "lineStart": 3,
+      "lineEnd": 7,
+      "text": "Contract fixture: use Convex full-text search for decision recall.",
+      "agent": "contract-fixture",
+      "confirmed": true
+    }
+  ]
+}
