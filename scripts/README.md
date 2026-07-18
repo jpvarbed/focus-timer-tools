@@ -46,6 +46,14 @@ The harness fires the hook; the script maps the CC lifecycle to fleet presence:
 Semantic reporting (asks with text, decisions/provenance) stays explicit via the MCP/CLI
 (`focus_ask`, `focus_event`) — hooks only cover automatic presence. Python 3 only (stdlib).
 
+## `smoke-memory.ts` — live decision-memory smoke
+
+End-to-end check of the deployed memory path that convex-test can't cover: real HTTP router +
+bearer key, real full-text search, and the actual `FocusHttpClient` contracts. Loads a marker
+decision into the reserved `smoke.invalid/focus/memory` scope, verifies replay dedup, stored
+receipt, and search, then tombstones it — self-cleaning, so it's safe to run against prod after
+a deploy. `bun run smoke` (env: `FOCUS_API_KEY`, optional `FOCUS_CONVEX_SITE`).
+
 ## `graph.ts` — Neo4j graph brain (FOC-14 / slice 4)
 
 Projects the Convex provenance log into Neo4j (Aura) and queries it. Convex is the source of
