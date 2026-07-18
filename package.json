@@ -7,7 +7,8 @@
     "build": "bun run build:workspaces && bun run build:hosted",
     "build:workspaces": "bun run --filter '*' build",
     "build:hosted": "tsc -p tsconfig.hosted.json",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke": "bun scripts/smoke-memory.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

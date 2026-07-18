@@ -1,0 +1,19 @@
+name: post-merge smoke
+
+# Push-to-main only: the FOCUS_API_KEY secret must never be exposed to fork PRs,
+# and the smoke's prod writes are self-cleaning (see scripts/smoke-memory.ts).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run smoke
+        env:
+          FOCUS_API_KEY: ${{ secrets.FOCUS_API_KEY }}
