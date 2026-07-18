@@ -138,3 +138,6 @@ the collector/ETL/Focus lifecycle; **knowledge** → `learn`. Neo4j is never a w
   `focus.jasonv.dev/.well-known/ai-catalog.json`.
 - Convex **prod `perceptive-butterfly-406`** (auth-gated, live). Neo4j Aura `4ceadc9b`. Arize traces
   → the `claude-code` project.
+- **Working on the memory system itself** (not just using it)? Each repo's `CLAUDE.md` has the
+  testing ladder. The live end-to-end check is `bun run smoke` here (self-cleaning, safe on prod) —
+  run it after contract changes and after every backend deploy; CI repeats it on merge to main.
